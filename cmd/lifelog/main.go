@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Bori513/lifelog/internal/database"
@@ -13,6 +17,7 @@ import (
 
 const defaultDataDir = "./data"
 const defaultAddr = ":8080"
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	dataDir := os.Getenv("LIFELOG_DATA_DIR")
@@ -36,8 +41,25 @@ func main() {
 	}
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("LifeLog listening on %s (data: %s)", addr, dataDir)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("serve LifeLog: %v", err)
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ListenAndServe() }()
+
+	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("serve LifeLog: %v", err)
+		}
+		return
+	case <-signalContext.Done():
+		log.Print("shutting down LifeLog")
+	}
+
+	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		log.Printf("graceful shutdown: %v", err)
 	}
 }
 

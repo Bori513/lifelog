@@ -33,6 +33,7 @@ const (
 )
 
 type Server struct {
+	db            *sql.DB
 	profiles      *profiles.Store
 	questions     *questions.Store
 	journal       *journal.Store
@@ -111,8 +112,9 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	if err != nil {
 		return nil, fmt.Errorf("parse web templates: %w", err)
 	}
-	s := &Server{profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
+	s := &Server{db: db, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /", s.root)
 	mux.HandleFunc("POST /profiles", s.createProfile)
 	mux.HandleFunc("GET /profiles", s.profileList)
@@ -142,6 +144,15 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	mux.Handle("GET /static/", http.FileServerFS(webassets.Files))
 	s.handler = s.securityHeaders(mux)
 	return s, nil
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	if err := s.db.PingContext(r.Context()); err != nil {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte("ok\n"))
 }
 
 func staticFile(name, contentType string) http.HandlerFunc {

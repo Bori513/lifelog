@@ -1,0 +1,12 @@
+services:
+  lifelog:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      LIFELOG_DATA_DIR: /data
+      LIFELOG_ADDR: :8080
+      LIFELOG_SECURE_COOKIES: "false"
+    restart: unless-stopped

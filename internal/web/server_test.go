@@ -179,6 +179,33 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 	}
 }
 
+func TestHealthChecksDatabaseWithoutAuthentication(t *testing.T) {
+	a := newTestApp(t)
+	w := a.request(http.MethodGet, "/healthz", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Body.String(); got != "ok\n" {
+		t.Fatalf("health body = %q, want %q", got, "ok\n")
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("health content type = %q", got)
+	}
+}
+
+func TestHealthReportsUnavailableDatabase(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	w := a.request(http.MethodGet, "/healthz", nil)
+	if w.Code != http.StatusServiceUnavailable || w.Body.String() != "unavailable\n" {
+		t.Fatalf("health response: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
 func TestFirstRunCreatesProfileJournalAndSession(t *testing.T) {
 	a := newTestApp(t)
 	token, w := a.getToken("/")

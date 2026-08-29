@@ -14,7 +14,7 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [x] 8. Add filesystem-backed photos and photo metadata
 - [x] 9. Add rebuildable SQLite full-text search
 - [x] 10. Build and polish the mobile-first PWA experience
-- [ ] 11. Add Docker deployment for Linux AMD64 and ARM64
+- [x] 11. Add Docker deployment for Linux AMD64 and ARM64
 - [ ] 12. Conduct real-world MVP testing and reliability polish
 
 ## Post-MVP
