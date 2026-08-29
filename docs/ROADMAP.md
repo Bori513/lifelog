@@ -9,11 +9,12 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [x] 3. Implement custom questions, options, ordering, and activation state
 - [x] 4. Implement the daily journal and atomic whole-day Save operation
 - [x] 5. Add local profiles, sessions, and optional PIN/password protection
-- [ ] 6. Add filesystem-backed photos and photo metadata
-- [ ] 7. Add rebuildable SQLite full-text search
-- [ ] 8. Build and polish the mobile-first PWA experience
-- [ ] 9. Add Docker deployment for Linux AMD64 and ARM64
-- [ ] 10. Conduct real-world MVP testing and reliability polish
+- [x] 6. Build the web foundation and mobile-first daily journal UI
+- [ ] 7. Add filesystem-backed photos and photo metadata
+- [ ] 8. Add rebuildable SQLite full-text search
+- [ ] 9. Build and polish the mobile-first PWA experience
+- [ ] 10. Add Docker deployment for Linux AMD64 and ARM64
+- [ ] 11. Conduct real-world MVP testing and reliability polish
 
 ## Post-MVP
 

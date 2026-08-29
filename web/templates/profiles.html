@@ -1,0 +1,8 @@
+{{define "profiles.html"}}{{template "head" .}}
+<header class="brand"><span class="brand-mark">L</span><strong>LifeLog</strong></header>
+{{if .ShowCreate}}
+<section class="panel"><h1>Create your profile</h1><p class="muted">Set up your private daily journal.</p>{{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+<form method="post" action="/profiles" class="stack"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><label>Name<input name="name" autocomplete="name" required autofocus></label><label>Timezone<input name="timezone" value="UTC" data-timezone required></label><label>PIN or password <span class="optional">Optional</span><input type="password" name="pin" autocomplete="new-password" minlength="4"></label><button class="primary" type="submit">Create profile</button></form></section>
+{{else}}
+<section class="panel"><h1>Who’s journaling?</h1><div class="profile-list">{{range .Profiles}}<form method="post" action="/profiles/select"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{.ID}}"><button class="profile-button" type="submit"><span class="avatar">{{initial .Name}}</span><span>{{.Name}}</span>{{if .HasPIN}}<span class="lock" aria-label="PIN protected">●</span>{{end}}</button></form>{{end}}</div><a class="secondary" href="/profiles?create=1">+ Add profile</a></section>
+{{end}}{{template "foot" .}}{{end}}

@@ -33,8 +33,25 @@ outweighs the project's priority order: simplicity, reliability, speed, features
 
 - **Render HTML on the server with `html/template`.** This supports a fast,
   understandable interface with little runtime or tooling overhead.
+- **Use the standard library HTTP server and router.** `net/http` provides the
+  small route set and server safety controls needed by the application without
+  adding a framework dependency.
+- **Embed templates and static assets in the application binary.** The web UI
+  has no separate runtime asset deployment or frontend build step.
 - **Use vanilla JavaScript and simple CSS.** The interface does not require a
   frontend framework or Node-based build pipeline.
+- **Use database-backed bearer sessions in secure cookies.** The browser stores
+  only the plaintext bearer token in an `HttpOnly`, `SameSite=Lax` cookie; the
+  database retains only its hash. Cookie transport security is configurable for
+  local HTTP or HTTPS deployment.
+- **Protect state-changing forms with CSRF tokens.** A cryptographically random
+  double-submit cookie token covers both pre-session authentication forms and
+  authenticated journal forms without adding a framework.
+- **Use Post/Redirect/Get after a successful whole-day Save.** The daily form is
+  committed in one request through the existing atomic domain operation, then
+  redirects to prevent accidental resubmission and display Save status.
+- **Determine `/today` in the authenticated profile's timezone.** Journal dates
+  represent the user's local calendar day rather than the server's UTC date.
 - **Build mobile-first and provide PWA capabilities.** Daily use is phone-centered;
   installation and standalone display are useful without requiring offline sync.
 - **Do not implement offline journal sync in the MVP.** Synchronization would add
