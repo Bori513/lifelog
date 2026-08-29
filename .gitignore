@@ -1,0 +1,42 @@
+# Go build and test output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local runtime data and uploads
+/data/
+/photos/
+/uploads/
+
+# SQLite databases and sidecar files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+/config/
+*.local
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
