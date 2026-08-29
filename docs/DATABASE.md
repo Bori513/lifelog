@@ -1,8 +1,8 @@
 # Database design
 
-This document describes the proposed relational model. It is design guidance,
-not a SQL migration. SQLite is the durable source of truth except for photo files,
-whose metadata and relative paths are stored in SQLite.
+This document describes the implemented relational model. The authoritative SQL
+definition is `migrations/001_initial.sql`. SQLite is the durable source of truth
+except for photo files, whose metadata and relative paths are stored in SQLite.
 
 ## Relationships
 
@@ -167,9 +167,12 @@ the current journal configuration but does not rewrite historical wording:
 `answer_options.option_label_snapshot` preserves each selected option label as
 they existed when the answer was saved.
 
-Deletion behavior and foreign-key actions will be made explicit in migrations.
-At minimum, destructive deletion must be prevented for users, journals,
-questions, options, days, or answers while dependent historical records exist.
+The initial migration cascades deletion of owned records from users through
+journals and their days, and from days through answers and photos. Sessions are
+also owned by users. Deleting an answer cascades its selected `answer_options`.
+Direct deletion of a question or option referenced by a historical answer is
+prevented. This allows removal of an entire owning container while protecting
+historical meaning from isolated configuration deletion.
 
 ## Full-text search
 

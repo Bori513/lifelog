@@ -1,11 +1,11 @@
 # Roadmap
 
-LifeLog is at the documentation stage. Phases are intended to proceed in order.
+LifeLog is in active development. Phases are intended to proceed in order.
 
 ## MVP
 
 - [x] 1. Establish project documentation and architectural source of truth
-- [ ] 2. Create the Go skeleton, SQLite integration, and schema migrations
+- [x] 2. Create the Go skeleton, SQLite integration, and schema migrations
 - [ ] 3. Implement custom questions, options, ordering, and activation state
 - [ ] 4. Implement the daily journal and atomic whole-day Save operation
 - [ ] 5. Add local profiles, sessions, and optional PIN/password protection

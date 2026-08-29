@@ -4,8 +4,8 @@ LifeLog is a minimalist, self-hosted personal journal. It is designed to keep a
 person's journal on hardware they control while remaining easy to understand,
 back up, move, and run on modest devices.
 
-> LifeLog is in early development. The application has not been implemented and
-> is not ready for use.
+> LifeLog is in early development. The database foundation is implemented, but
+> the application is not ready for journal use.
 
 ## Priorities
 
