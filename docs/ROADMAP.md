@@ -8,7 +8,7 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [x] 2. Create the Go skeleton, SQLite integration, and schema migrations
 - [x] 3. Implement custom questions, options, ordering, and activation state
 - [x] 4. Implement the daily journal and atomic whole-day Save operation
-- [ ] 5. Add local profiles, sessions, and optional PIN/password protection
+- [x] 5. Add local profiles, sessions, and optional PIN/password protection
 - [ ] 6. Add filesystem-backed photos and photo metadata
 - [ ] 7. Add rebuildable SQLite full-text search
 - [ ] 8. Build and polish the mobile-first PWA experience

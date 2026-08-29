@@ -53,6 +53,16 @@ outweighs the project's priority order: simplicity, reliability, speed, features
 - **Support multiple users while optimizing for one.** Local profiles allow shared
   installations, while optional PINs and a possible direct-entry path keep personal
   installations simple.
+- **Store optional PIN/password credentials as bcrypt hashes.** Credentials are
+  one-way hashed with bcrypt and are never stored or exposed as plaintext.
+- **Use hashed, high-entropy bearer tokens for sessions.** Session tokens contain
+  256 bits of randomness from the operating system. Only their deterministic
+  SHA-256 hashes are stored, which supports lookup without retaining bearer tokens.
+- **Create the initial journal with its profile atomically.** Every new profile
+  receives a `Personal` journal in the same transaction, preventing partial setup.
+- **Derive single-user direct-entry eligibility.** Exactly one profile with no PIN
+  is eligible; this is calculated from profile data rather than stored as a separate
+  application mode.
 - **Model journals separately from users.** The MVP exposes one journal per user,
   but the schema can support more without a migration of historical entries.
 - **Treat presets as question templates, not subsystems.** Applying a preset simply

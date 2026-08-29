@@ -28,6 +28,8 @@ answers * ── * question_options (through answer_options)
 | `updated_at` | Last update timestamp |
 
 Users are local profiles and require no email address.
+PIN/password protection is optional. When configured, `pin_hash` contains a bcrypt
+hash and is never exposed as profile data.
 
 ### `journals`
 
@@ -40,6 +42,7 @@ Users are local profiles and require no email address.
 | `updated_at` | Last update timestamp |
 
 One user owns many journals at the database level. The MVP interface exposes one.
+Creating a profile atomically creates its initial journal named `Personal`.
 
 ### `questions`
 
@@ -157,9 +160,11 @@ Paths stored in the database remain relative so the data directory can move.
 
 ## Small technical tables
 
-- `sessions` stores minimal server-side session state for local profiles. Its exact
-  fields, expiry policy, and credential representation will be defined with the
-  authentication design.
+- `sessions` stores minimal server-side session state for local profiles. Bearer
+  tokens contain 256 bits of cryptographically secure randomness and only their
+  SHA-256 hashes are stored in `token_hash`. Sessions have a fixed UTC expiration;
+  lookup neither extends it nor accepts expired sessions. Expired rows can be
+  removed opportunistically.
 - `schema_migrations` records applied database migrations.
 - `search_documents` holds one derived searchable document per day.
 - An SQLite FTS virtual table indexes the derived search documents.
