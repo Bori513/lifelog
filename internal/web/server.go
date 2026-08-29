@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Bori513/lifelog/internal/journal"
+	"github.com/Bori513/lifelog/internal/photos"
 	"github.com/Bori513/lifelog/internal/profiles"
 	"github.com/Bori513/lifelog/internal/questions"
 	webassets "github.com/Bori513/lifelog/web"
@@ -30,6 +35,7 @@ type Server struct {
 	profiles      *profiles.Store
 	questions     *questions.Store
 	journal       *journal.Store
+	photos        *photos.Store
 	templates     *template.Template
 	secureCookies bool
 	now           func() time.Time
@@ -51,6 +57,10 @@ type QuestionView struct {
 	Scale              []int
 }
 type QuestionTypeView struct{ Value, Label string }
+type PhotoView struct {
+	ID  int64
+	URL string
+}
 type ManageOptionView struct {
 	ID       int64
 	Label    string
@@ -74,11 +84,12 @@ type PageData struct {
 	Saved                                          bool
 	GeneralNote, SpecialMoment, Location           string
 	Questions                                      []QuestionView
+	Photos                                         []PhotoView
 	ActiveQuestions, InactiveQuestions             []ManageQuestionView
 	QuestionTypes                                  []QuestionTypeView
 }
 
-func New(db *sql.DB, secureCookies bool, logger *log.Logger) (*Server, error) {
+func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -92,7 +103,7 @@ func New(db *sql.DB, secureCookies bool, logger *log.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse web templates: %w", err)
 	}
-	s := &Server{profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
+	s := &Server{profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.root)
 	mux.HandleFunc("POST /profiles", s.createProfile)
@@ -104,6 +115,7 @@ func New(db *sql.DB, secureCookies bool, logger *log.Logger) (*Server, error) {
 	mux.HandleFunc("GET /today", s.today)
 	mux.HandleFunc("GET /day/{date}", s.getDay)
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
+	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
 	mux.HandleFunc("GET /questions", s.getQuestions)
 	mux.HandleFunc("POST /questions", s.createQuestion)
 	mux.HandleFunc("POST /questions/reorder", s.reorderQuestions)
@@ -539,8 +551,11 @@ func (s *Server) saveDay(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.parseForm(w, r) {
+	if !s.parseDayForm(w, r) {
 		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 	if !s.validCSRF(r) {
 		http.Error(w, "Invalid form token.", http.StatusForbidden)
@@ -556,12 +571,82 @@ func (s *Server) saveDay(w http.ResponseWriter, r *http.Request) {
 		s.renderDay(w, r, p, date, err.Error())
 		return
 	}
-	if _, err := s.journal.SaveDay(r.Context(), j.ID, date, input); err != nil {
+	files := r.MultipartForm
+	var uploads []*multipart.FileHeader
+	if files != nil {
+		uploads = files.File["photos"]
+	}
+	staged, err := s.photos.Stage(uploads, p.ID, date)
+	if err != nil {
+		s.renderDay(w, r, p, date, photoError(err))
+		return
+	}
+	defer s.photos.CleanupStaged(staged)
+	removeIDs, err := removalIDs(r.PostForm["remove_photo"])
+	if err != nil {
+		s.renderDay(w, r, p, date, "One of the selected photos could not be removed.")
+		return
+	}
+	existing, err := s.photos.ListForDay(r.Context(), p.ID, date)
+	if err != nil {
+		s.internal(w, "load photos for removal", err)
+		return
+	}
+	allowed := make(map[int64]struct{}, len(existing))
+	for _, photo := range existing {
+		allowed[photo.ID] = struct{}{}
+	}
+	for _, id := range removeIDs {
+		if _, ok := allowed[id]; !ok {
+			http.Error(w, "Photo not found.", http.StatusNotFound)
+			return
+		}
+	}
+	day, err := s.journal.SaveDay(r.Context(), j.ID, date, input)
+	if err != nil {
 		s.logger.Printf("save day: %v", err)
 		s.renderDay(w, r, p, date, "Could not save this day. Check the highlighted values and try again.")
 		return
 	}
+	if err := s.photos.Persist(staged); err != nil {
+		s.logger.Printf("persist photos: %v", err)
+		s.renderDay(w, r, p, date, "The day was saved, but the photos could not be stored. Please try adding them again.")
+		return
+	}
+	if _, err := s.photos.Add(r.Context(), p.ID, day.ID, staged); err != nil {
+		s.photos.CleanupPersisted(staged)
+		s.logger.Printf("save photo metadata: %v", err)
+		s.renderDay(w, r, p, date, "The day was saved, but the photos could not be stored. Please try adding them again.")
+		return
+	}
+	for _, id := range removeIDs {
+		removed, err := s.photos.Remove(r.Context(), p.ID, id)
+		if err != nil {
+			s.logger.Printf("remove photo metadata %d: %v", id, err)
+			continue
+		}
+		if err := s.photos.DeleteFile(removed); err != nil {
+			s.logger.Printf("remove photo file %d: %v", id, err)
+		}
+	}
 	http.Redirect(w, r, "/day/"+date+"?saved=1", http.StatusSeeOther)
+}
+
+func removalIDs(values []string) ([]int64, error) {
+	seen := make(map[int64]struct{}, len(values))
+	result := make([]int64, 0, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id < 1 {
+			return nil, errors.New("invalid photo ID")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result, nil
 }
 
 func (s *Server) renderDay(w http.ResponseWriter, r *http.Request, p profiles.Profile, date, message string) {
@@ -578,6 +663,15 @@ func (s *Server) renderDay(w http.ResponseWriter, r *http.Request, p profiles.Pr
 	if err != nil {
 		s.internal(w, "load day", err)
 		return
+	}
+	photoItems, err := s.photos.ListForDay(r.Context(), p.ID, date)
+	if err != nil {
+		s.internal(w, "load day photos", err)
+		return
+	}
+	photoViews := make([]PhotoView, 0, len(photoItems))
+	for _, item := range photoItems {
+		photoViews = append(photoViews, PhotoView{ID: item.ID, URL: "/photos/" + strconv.FormatInt(item.ID, 10)})
 	}
 	all, err := s.questions.ListQuestions(r.Context(), j.ID, true)
 	if err != nil {
@@ -646,8 +740,51 @@ func (s *Server) renderDay(w http.ResponseWriter, r *http.Request, p profiles.Pr
 	}
 	loc, _ := time.LoadLocation(p.Timezone)
 	today := s.now().In(loc).Format("2006-01-02")
-	d := PageData{Title: "Daily journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), Date: date, DateLabel: parsed.Format("2 January 2006"), PreviousDate: parsed.AddDate(0, 0, -1).Format("2006-01-02"), NextDate: parsed.AddDate(0, 0, 1).Format("2006-01-02"), Today: today, Saved: r.URL.Query().Get("saved") == "1", Error: message, GeneralNote: day.GeneralNote, SpecialMoment: day.SpecialMoment, Location: day.Location, Questions: views}
+	d := PageData{Title: "Daily journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), Date: date, DateLabel: parsed.Format("2 January 2006"), PreviousDate: parsed.AddDate(0, 0, -1).Format("2006-01-02"), NextDate: parsed.AddDate(0, 0, 1).Format("2006-01-02"), Today: today, Saved: r.URL.Query().Get("saved") == "1", Error: message, GeneralNote: day.GeneralNote, SpecialMoment: day.SpecialMoment, Location: day.Location, Questions: views, Photos: photoViews}
 	s.render(w, "day.html", d)
+}
+
+func (s *Server) getPhoto(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		http.NotFound(w, r)
+		return
+	}
+	photo, err := s.photos.Get(r.Context(), p.ID, id)
+	if errors.Is(err, photos.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.internal(w, "load photo", err)
+		return
+	}
+	path, err := s.photos.ResolvePath(photo.RelativePath)
+	if err != nil {
+		s.internal(w, "resolve photo", err)
+		return
+	}
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.internal(w, "open photo", err)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		s.internal(w, "stat photo", err)
+		return
+	}
+	w.Header().Set("Content-Type", photo.MIMEType)
+	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
 }
 
 func (s *Server) dayInput(r *http.Request, journalID int64) (journal.SaveDayInput, error) {
@@ -791,6 +928,40 @@ func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) parseDayForm(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		return s.parseForm(w, r)
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, photos.MaxRequestBytes)
+	if err := r.ParseMultipartForm(4 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "Photo upload is too large.", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "Invalid photo form.", http.StatusBadRequest)
+		}
+		return false
+	}
+	return true
+}
+
+func photoError(err error) string {
+	switch {
+	case errors.Is(err, photos.ErrTooMany):
+		return "You can add up to 10 photos in one Save."
+	case errors.Is(err, photos.ErrTooLarge):
+		return "Each photo must be 20 MiB or smaller."
+	case errors.Is(err, photos.ErrEmpty):
+		return "An empty file is not a valid photo."
+	case errors.Is(err, photos.ErrUnsupported):
+		return "Only JPEG, PNG, and WebP photos are supported."
+	case errors.Is(err, photos.ErrInvalidDate):
+		return "Invalid date."
+	default:
+		return "Could not prepare the selected photos. Please try again."
+	}
 }
 func (s *Server) render(w http.ResponseWriter, name string, data PageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

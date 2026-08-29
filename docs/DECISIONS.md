@@ -26,6 +26,12 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   columns and option relations support validation, querying, and durable history.
 - **Store photos on the filesystem.** SQLite contains metadata and a relative path,
   keeping the database small and the backup layout understandable.
+- **Upload photos only with the manual whole-day Save.** The browser previews
+  selected files locally; the authenticated multipart day request validates JPEG,
+  PNG, or WebP content on the server before staged files become permanent.
+- **Serve uploaded photos through authenticated routes.** The application checks
+  ownership through photo, day, journal, and user records instead of exposing the
+  photo directory as static content.
 - **Treat FTS as rebuildable derived data.** Normal relational journal records are
   the source of truth, so loss or corruption of the index is recoverable.
 

@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/Bori513/lifelog/internal/database"
 	"github.com/Bori513/lifelog/internal/journal"
+	"github.com/Bori513/lifelog/internal/photos"
 	"github.com/Bori513/lifelog/internal/profiles"
 	"github.com/Bori513/lifelog/internal/questions"
 )
@@ -24,21 +28,24 @@ type testApp struct {
 	profiles  *profiles.Store
 	questions *questions.Store
 	journal   *journal.Store
+	photos    *photos.Store
+	dataDir   string
 	cookies   map[string]*http.Cookie
 }
 
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
-	db, err := database.Open(t.TempDir())
+	dataDir := t.TempDir()
+	db, err := database.Open(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	s, err := New(db, false, log.New(io.Discard, "", 0))
+	s, err := New(db, dataDir, false, log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &testApp{t: t, s: s, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), cookies: map[string]*http.Cookie{}}
+	return &testApp{t: t, s: s, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), dataDir: dataDir, cookies: map[string]*http.Cookie{}}
 }
 
 func (a *testApp) request(method, path string, form url.Values) *httptest.ResponseRecorder {
@@ -65,6 +72,44 @@ func (a *testApp) request(method, path string, form url.Values) *httptest.Respon
 	}
 	return w
 }
+
+func (a *testApp) multipartRequest(path string, values url.Values, files map[string][]byte) *httptest.ResponseRecorder {
+	a.t.Helper()
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	for key, entries := range values {
+		for _, value := range entries {
+			if err := w.WriteField(key, value); err != nil {
+				a.t.Fatal(err)
+			}
+		}
+	}
+	for name, data := range files {
+		part, err := w.CreateFormFile("photos", name)
+		if err != nil {
+			a.t.Fatal(err)
+		}
+		if _, err := part.Write(data); err != nil {
+			a.t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		a.t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, path, &body)
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	for _, c := range a.cookies {
+		r.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	a.s.Handler().ServeHTTP(rr, r)
+	for _, c := range rr.Result().Cookies() {
+		a.cookies[c.Name] = c
+	}
+	return rr
+}
+
+func testJPEG() []byte { return []byte{0xff, 0xd8, 0xff, 0xe0, 0, 16, 'J', 'F', 'I', 'F', 0} }
 
 func (a *testApp) getToken(path string) (string, *httptest.ResponseRecorder) {
 	w := a.request(http.MethodGet, path, nil)
@@ -323,6 +368,121 @@ func TestInvalidWholeDaySaveIsAtomic(t *testing.T) {
 	day, _ := a.journal.GetDay(t.Context(), js[0].ID, "2026-08-29")
 	if day.GeneralNote != "original" || len(day.Answers) != 1 || day.Answers[0].NumberValue == nil || *day.Answers[0].NumberValue != 3 {
 		t.Fatalf("failed save partially persisted: %+v", day)
+	}
+}
+
+func TestPhotoUploadServingReopenRemovalAndIsolation(t *testing.T) {
+	a := newTestApp(t)
+	userA := a.create("Photo owner", "", "UTC")
+	userB := a.create("Other user", "", "UTC")
+	a.loginProfile(userA.ID)
+	token, w := a.getToken("/day/2026-08-29")
+	if w.Code != http.StatusOK {
+		t.Fatalf("empty day=%d", w.Code)
+	}
+	journals, _ := a.profiles.ListJournals(t.Context(), userA.ID)
+	before, _ := a.journal.GetDay(t.Context(), journals[0].ID, "2026-08-29")
+	if before.Exists {
+		t.Fatal("viewing an empty day created it")
+	}
+	w = a.multipartRequest("/day/2026-08-29", url.Values{"csrf_token": {token}, "general_note": {"with photo"}}, map[string][]byte{"Trip photo ü.jpg": testJPEG()})
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/day/2026-08-29?saved=1" {
+		t.Fatalf("upload=%d %s", w.Code, w.Body.String())
+	}
+	day, _ := a.journal.GetDay(t.Context(), journals[0].ID, "2026-08-29")
+	items, err := a.photos.ListForDay(t.Context(), userA.ID, "2026-08-29")
+	if err != nil || !day.Exists || day.GeneralNote != "with photo" || len(items) != 1 {
+		t.Fatalf("day=%+v photos=%+v err=%v", day, items, err)
+	}
+	if items[0].OriginalFilename != "Trip photo ü.jpg" || items[0].MIMEType != "image/jpeg" || items[0].FileSize != int64(len(testJPEG())) {
+		t.Fatalf("metadata=%+v", items[0])
+	}
+	w = a.request(http.MethodGet, "/day/2026-08-29", nil)
+	photoURL := "/photos/" + strconv.FormatInt(items[0].ID, 10)
+	if !strings.Contains(w.Body.String(), photoURL) {
+		t.Fatal("reopened day did not list photo")
+	}
+	w = a.request(http.MethodGet, photoURL, nil)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/jpeg" || !bytes.Equal(w.Body.Bytes(), testJPEG()) {
+		t.Fatalf("serve=%d type=%q body=%v", w.Code, w.Header().Get("Content-Type"), w.Body.Bytes())
+	}
+
+	a.loginProfile(userB.ID)
+	w = a.request(http.MethodGet, photoURL, nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-user photo view=%d", w.Code)
+	}
+	token, _ = a.getToken("/day/2026-08-29")
+	w = a.multipartRequest("/day/2026-08-29", url.Values{"csrf_token": {token}, "remove_photo": {strconv.FormatInt(items[0].ID, 10)}}, nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-user removal=%d", w.Code)
+	}
+	if _, err := a.photos.Get(t.Context(), userA.ID, items[0].ID); err != nil {
+		t.Fatalf("owner photo removed by other user: %v", err)
+	}
+
+	a.loginProfile(userA.ID)
+	token, _ = a.getToken("/day/2026-08-29")
+	w = a.multipartRequest("/day/2026-08-29", url.Values{"csrf_token": {token}, "general_note": {"with photo"}, "remove_photo": {strconv.FormatInt(items[0].ID, 10)}}, nil)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("owner removal=%d %s", w.Code, w.Body.String())
+	}
+	if _, err := a.photos.Get(t.Context(), userA.ID, items[0].ID); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("removed metadata lookup=%v", err)
+	}
+}
+
+func TestInvalidPhotoDoesNotSaveDay(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Writer", "", "UTC")
+	a.loginProfile(p.ID)
+	token, _ := a.getToken("/day/2026-08-30")
+	w := a.multipartRequest("/day/2026-08-30", url.Values{"csrf_token": {token}, "general_note": {"must not save"}}, map[string][]byte{"fake.jpg": []byte("<html>not a photo</html>")})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Only JPEG, PNG, and WebP") {
+		t.Fatalf("invalid photo=%d %s", w.Code, w.Body.String())
+	}
+	journals, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	day, _ := a.journal.GetDay(t.Context(), journals[0].ID, "2026-08-30")
+	if day.Exists {
+		t.Fatal("invalid photo partially saved day")
+	}
+}
+
+func TestInvalidAnswerWithValidPhotoSavesNeither(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Writer", "", "UTC")
+	js, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	q, _ := a.questions.CreateQuestion(t.Context(), js[0].ID, questions.CreateQuestionInput{Label: "Energy", Type: questions.QuestionTypeScale5})
+	valid := float64(3)
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-08-29", journal.SaveDayInput{GeneralNote: "original", Answers: []journal.AnswerInput{{QuestionID: q.ID, NumberValue: &valid}}}); err != nil {
+		t.Fatal(err)
+	}
+	a.loginProfile(p.ID)
+	token, _ := a.getToken("/day/2026-08-29")
+	prefix := "q_" + strconv.FormatInt(q.ID, 10)
+	w := a.multipartRequest("/day/2026-08-29", url.Values{"csrf_token": {token}, "general_note": {"changed"}, prefix + "_present": {"1"}, prefix: {"9"}}, map[string][]byte{"valid.jpg": testJPEG()})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Could not save this day") {
+		t.Fatalf("invalid save=%d %s", w.Code, w.Body.String())
+	}
+	day, _ := a.journal.GetDay(t.Context(), js[0].ID, "2026-08-29")
+	items, _ := a.photos.ListForDay(t.Context(), p.ID, "2026-08-29")
+	if day.GeneralNote != "original" || len(items) != 0 {
+		t.Fatalf("partial save day=%+v photos=%+v", day, items)
+	}
+}
+
+func TestOneInvalidPhotoRejectsAllPhotos(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Writer", "", "UTC")
+	a.loginProfile(p.ID)
+	token, _ := a.getToken("/day/2026-08-31")
+	w := a.multipartRequest("/day/2026-08-31", url.Values{"csrf_token": {token}}, map[string][]byte{"valid.jpg": testJPEG(), "bad.jpg": []byte("not an image")})
+	if w.Code != http.StatusOK {
+		t.Fatalf("mixed upload=%d", w.Code)
+	}
+	items, _ := a.photos.ListForDay(t.Context(), p.ID, "2026-08-31")
+	if len(items) != 0 {
+		t.Fatalf("mixed upload persisted photos=%+v", items)
 	}
 }
 

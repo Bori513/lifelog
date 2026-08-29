@@ -16,6 +16,32 @@ document.addEventListener("DOMContentLoaded", () => {
   const label = document.querySelector(".dirty-label");
   const mark = () => { dirty = true; if (label) label.textContent = "Unsaved changes"; };
   form.addEventListener("input", mark); form.addEventListener("change", mark);
+  document.querySelectorAll("[data-remove-photo]").forEach(input => input.addEventListener("change", () => {
+    input.closest(".photo-tile")?.classList.toggle("pending-removal", input.checked);
+    if (input.nextElementSibling) input.nextElementSibling.textContent = input.checked ? "Keep" : "Remove";
+  }));
+  const photoInput = document.querySelector("[data-photo-input]");
+  const previews = document.querySelector("[data-photo-previews]");
+  let pending = [], objectURLs = [];
+  const renderPhotos = () => {
+    objectURLs.forEach(URL.revokeObjectURL); objectURLs = [];
+    previews?.replaceChildren();
+    pending.forEach((file, index) => {
+      const tile = document.createElement("div"); tile.className = "photo-tile";
+      const image = document.createElement("img"); const url = URL.createObjectURL(file);
+      objectURLs.push(url); image.src = url; image.alt = "New photo preview";
+      const button = document.createElement("button"); button.type = "button"; button.textContent = "Remove";
+      button.addEventListener("click", () => { pending.splice(index, 1); syncPhotos(); mark(); });
+      tile.append(image, button); previews?.append(tile);
+    });
+  };
+  const syncPhotos = () => {
+    if (!photoInput) return;
+    const transfer = new DataTransfer(); pending.forEach(file => transfer.items.add(file)); photoInput.files = transfer.files;
+    renderPhotos();
+  };
+  photoInput?.addEventListener("change", () => { pending = Array.from(photoInput.files); syncPhotos(); });
+  window.addEventListener("pagehide", () => objectURLs.forEach(URL.revokeObjectURL));
   form.addEventListener("submit", () => { dirty = false; });
   window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
 });

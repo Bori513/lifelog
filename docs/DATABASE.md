@@ -158,6 +158,16 @@ data/photos/USER_ID/YYYY/MM/DD/UUID.jpg
 The database and photos directory together form the durable journal backup.
 Paths stored in the database remain relative so the data directory can move.
 
+Photo uploads are validated and staged before the atomic journal Save. After the
+journal transaction commits, staged files are moved into the photo directory and
+their metadata is inserted in one SQLite transaction. If file persistence or
+metadata insertion fails, newly written files are cleaned up where possible.
+SQLite and the filesystem cannot form one ACID transaction, so a storage failure
+after the journal commit can leave the journal fields saved without the requested
+new photos; the interface reports this explicitly. Photo removal deletes metadata
+first and then attempts file deletion, preferring a harmless orphan file over a
+database record that points to a missing file.
+
 ## Small technical tables
 
 - `sessions` stores minimal server-side session state for local profiles. Bearer

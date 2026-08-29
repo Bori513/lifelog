@@ -30,7 +30,7 @@ func main() {
 		addr = defaultAddr
 	}
 	secureCookies := truthy(os.Getenv("LIFELOG_SECURE_COOKIES"))
-	app, err := web.New(db, secureCookies, log.Default())
+	app, err := web.New(db, dataDir, secureCookies, log.Default())
 	if err != nil {
 		log.Fatalf("initialize web application: %v", err)
 	}

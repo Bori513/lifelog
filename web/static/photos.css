@@ -1,0 +1,13 @@
+.photos-card h2 { font-size: 1.05rem; margin: 0; }
+.photo-help { font-size: .82rem; margin: 3px 0 0; }
+.photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.photo-grid:empty { display: none; }
+.photo-tile { position: relative; display: grid; overflow: hidden; border: 1px solid #d3dcd7; border-radius: 12px; background: #edf2ef; }
+.photo-tile img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.photo-tile input { position: absolute; opacity: 0; width: 1px; min-height: 1px; }
+.photo-tile span, .photo-tile button { min-height: 42px; border: 0; border-top: 1px solid #d3dcd7; background: white; color: #315a48; font-weight: 700; }
+.photo-tile.pending-removal img { opacity: .3; }
+.photo-tile.pending-removal::after { content: "Will be removed on Save"; position: absolute; inset: 0 0 42px; display: grid; place-items: center; padding: 10px; text-align: center; font-size: .78rem; font-weight: 750; }
+.photo-picker { display: block; padding: 12px 14px; border: 1px dashed #8ea398; border-radius: 11px; color: #315a48; text-align: center; cursor: pointer; }
+.photo-picker input { position: absolute; width: 1px; min-height: 1px; opacity: 0; }
+@media (min-width: 600px) { .photo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
