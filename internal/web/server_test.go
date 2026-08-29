@@ -325,3 +325,181 @@ func TestInvalidWholeDaySaveIsAtomic(t *testing.T) {
 		t.Fatalf("failed save partially persisted: %+v", day)
 	}
 }
+
+func TestQuestionManagementAuthenticationEmptyStateAndValidation(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Writer", "", "UTC")
+	w := a.request(http.MethodGet, "/questions", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("unauthenticated questions: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	a.loginProfile(p.ID)
+	token, w := a.getToken("/questions")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "No active questions yet") || !strings.Contains(w.Body.String(), "Multiple choice") {
+		t.Fatalf("question empty state: code=%d body=%s", w.Code, w.Body.String())
+	}
+	_, day := a.getToken("/day/2026-08-29")
+	if !strings.Contains(day.Body.String(), "Your journal has no questions yet") || !strings.Contains(day.Body.String(), `href="/questions"`) {
+		t.Fatal("daily empty state does not link to question management")
+	}
+	for _, tc := range []struct {
+		name string
+		form url.Values
+		want string
+	}{
+		{"missing csrf", url.Values{"label": {"Mood"}, "type": {"short_text"}}, "Invalid form token"},
+		{"blank label", url.Values{"csrf_token": {token}, "label": {"  "}, "type": {"short_text"}}, "cannot be empty"},
+		{"bad type", url.Values{"csrf_token": {token}, "label": {"Mood"}, "type": {"script"}}, "valid question type"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := a.request(http.MethodPost, "/questions", tc.form)
+			if w.Code != http.StatusForbidden && w.Code != http.StatusBadRequest {
+				t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("missing %q in %s", tc.want, w.Body.String())
+			}
+		})
+	}
+	w = a.request(http.MethodPost, "/questions", url.Values{"csrf_token": {token + "x"}, "label": {"Mood"}, "type": {"short_text"}})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("invalid csrf=%d", w.Code)
+	}
+}
+
+func TestQuestionManagementLifecycleOrderingAndEscaping(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Writer", "", "UTC")
+	js, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	a.loginProfile(p.ID)
+	token, _ := a.getToken("/questions")
+	post := func(path string, values url.Values) *httptest.ResponseRecorder {
+		values.Set("csrf_token", token)
+		w := a.request(http.MethodPost, path, values)
+		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/questions" {
+			t.Fatalf("post %s: code=%d location=%s body=%s", path, w.Code, w.Header().Get("Location"), w.Body.String())
+		}
+		return w
+	}
+	post("/questions", url.Values{"label": {"<script>alert(1)</script>"}, "type": {"short_text"}})
+	post("/questions", url.Values{"label": {"Meal"}, "type": {"select"}})
+	qs, _ := a.questions.ListQuestions(t.Context(), js[0].ID, false)
+	if len(qs) != 2 {
+		t.Fatalf("created questions=%v", qs)
+	}
+	page := a.request(http.MethodGet, "/questions", nil).Body.String()
+	if strings.Contains(page, "<script>alert(1)</script>") || !strings.Contains(page, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatal("question label was not escaped")
+	}
+	day := a.request(http.MethodGet, "/day/2026-08-29", nil).Body.String()
+	if !strings.Contains(day, "Meal") || !strings.Contains(day, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatal("created questions missing from daily journal")
+	}
+	post("/questions/reorder", url.Values{"id": {"2", "1"}})
+	qs, _ = a.questions.ListQuestions(t.Context(), js[0].ID, false)
+	if qs[0].Label != "Meal" {
+		t.Fatalf("question order=%v", qs)
+	}
+	day = a.request(http.MethodGet, "/day/2026-08-29", nil).Body.String()
+	if strings.Index(day, "Meal") > strings.Index(day, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatal("daily journal did not follow question order")
+	}
+	before := []int64{qs[0].ID, qs[1].ID}
+	w := a.request(http.MethodPost, "/questions/reorder", url.Values{"csrf_token": {token}, "id": {"1"}})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid reorder=%d", w.Code)
+	}
+	qs, _ = a.questions.ListQuestions(t.Context(), js[0].ID, false)
+	if qs[0].ID != before[0] || qs[1].ID != before[1] {
+		t.Fatal("invalid reorder partially changed order")
+	}
+	post("/questions/1/rename", url.Values{"label": {"Current mood"}})
+	post("/questions/1/deactivate", url.Values{})
+	page = a.request(http.MethodGet, "/questions", nil).Body.String()
+	if !strings.Contains(page, "Inactive questions") || !strings.Contains(page, "Current mood") {
+		t.Fatal("inactive question section missing")
+	}
+	day = a.request(http.MethodGet, "/day/2026-08-30", nil).Body.String()
+	if strings.Contains(day, "Current mood") {
+		t.Fatal("unused inactive question appears on future day")
+	}
+	post("/questions/1/reactivate", url.Values{})
+	qs, _ = a.questions.ListQuestions(t.Context(), js[0].ID, false)
+	if qs[len(qs)-1].ID != 1 {
+		t.Fatalf("reactivated question not appended: %v", qs)
+	}
+}
+
+func TestQuestionOptionManagementAndIsolation(t *testing.T) {
+	a := newTestApp(t)
+	userA := a.create("A", "", "UTC")
+	userB := a.create("B", "", "UTC")
+	ja, _ := a.profiles.ListJournals(t.Context(), userA.ID)
+	jb, _ := a.profiles.ListJournals(t.Context(), userB.ID)
+	selectA, _ := a.questions.CreateQuestion(t.Context(), ja[0].ID, questions.CreateQuestionInput{Label: "Meal", Type: questions.QuestionTypeSelect})
+	textA, _ := a.questions.CreateQuestion(t.Context(), ja[0].ID, questions.CreateQuestionInput{Label: "Note", Type: questions.QuestionTypeShortText})
+	questionB, _ := a.questions.CreateQuestion(t.Context(), jb[0].ID, questions.CreateQuestionInput{Label: "Private", Type: questions.QuestionTypeSelect})
+	optionB, _ := a.questions.CreateOption(t.Context(), jb[0].ID, questionB.ID, questions.CreateOptionInput{Label: "Secret"})
+	a.loginProfile(userA.ID)
+	token, _ := a.getToken("/questions")
+	post := func(path string, values url.Values) *httptest.ResponseRecorder {
+		values.Set("csrf_token", token)
+		return a.request(http.MethodPost, path, values)
+	}
+	for _, label := range []string{"<b>Breakfast</b>", "Dinner"} {
+		w := post("/questions/"+strconv.FormatInt(selectA.ID, 10)+"/options", url.Values{"label": {label}})
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("add option=%d %s", w.Code, w.Body.String())
+		}
+	}
+	page := a.request(http.MethodGet, "/questions", nil).Body.String()
+	if strings.Contains(page, "<b>Breakfast</b>") || !strings.Contains(page, "&lt;b&gt;Breakfast&lt;/b&gt;") {
+		t.Fatal("option label was not escaped")
+	}
+	if w := post("/questions/"+strconv.FormatInt(textA.ID, 10)+"/options", url.Values{"label": {"invalid"}}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "only available") {
+		t.Fatalf("non-select option: %d %s", w.Code, w.Body.String())
+	}
+	opts, _ := a.questions.ListOptions(t.Context(), ja[0].ID, selectA.ID, false)
+	selectPath := "/questions/" + strconv.FormatInt(selectA.ID, 10) + "/options/"
+	if w := post(selectPath+"reorder", url.Values{"id": {strconv.FormatInt(opts[1].ID, 10), strconv.FormatInt(opts[0].ID, 10)}}); w.Code != http.StatusSeeOther {
+		t.Fatalf("option reorder=%d", w.Code)
+	}
+	managedID := opts[0].ID
+	if w := post(selectPath+strconv.FormatInt(managedID, 10)+"/rename", url.Values{"label": {"Brunch"}}); w.Code != http.StatusSeeOther {
+		t.Fatalf("rename option=%d", w.Code)
+	}
+	if w := post(selectPath+strconv.FormatInt(managedID, 10)+"/deactivate", url.Values{}); w.Code != http.StatusSeeOther {
+		t.Fatalf("deactivate option=%d", w.Code)
+	}
+	if w := post(selectPath+strconv.FormatInt(managedID, 10)+"/reactivate", url.Values{}); w.Code != http.StatusSeeOther {
+		t.Fatalf("reactivate option=%d", w.Code)
+	}
+	opts, _ = a.questions.ListOptions(t.Context(), ja[0].ID, selectA.ID, false)
+	if len(opts) != 2 || opts[len(opts)-1].Label != "Brunch" {
+		t.Fatalf("managed options=%v", opts)
+	}
+	day := a.request(http.MethodGet, "/day/2026-08-29", nil).Body.String()
+	if strings.Index(day, "Dinner") > strings.Index(day, "Brunch") {
+		t.Fatal("daily journal did not follow active option order")
+	}
+	for _, attempt := range []struct {
+		path   string
+		values url.Values
+	}{
+		{"/questions/" + strconv.FormatInt(questionB.ID, 10) + "/rename", url.Values{"label": {"Stolen"}}},
+		{"/questions/" + strconv.FormatInt(questionB.ID, 10) + "/deactivate", url.Values{}},
+		{"/questions/reorder", url.Values{"id": {strconv.FormatInt(questionB.ID, 10), strconv.FormatInt(selectA.ID, 10), strconv.FormatInt(textA.ID, 10)}}},
+		{selectPath + strconv.FormatInt(optionB.ID, 10) + "/rename", url.Values{"label": {"Stolen"}}},
+		{"/questions/" + strconv.FormatInt(questionB.ID, 10) + "/options/" + strconv.FormatInt(optionB.ID, 10) + "/rename", url.Values{"label": {"Stolen"}}},
+	} {
+		w := post(attempt.path, attempt.values)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("isolation %s=%d", attempt.path, w.Code)
+		}
+	}
+	private, _ := a.questions.ListQuestions(t.Context(), jb[0].ID, true)
+	privateOpts, _ := a.questions.ListOptions(t.Context(), jb[0].ID, questionB.ID, true)
+	if private[0].Label != "Private" || !private[0].IsActive || privateOpts[0].ID != optionB.ID || privateOpts[0].Label != "Secret" {
+		t.Fatal("cross-user operation changed private configuration")
+	}
+}
