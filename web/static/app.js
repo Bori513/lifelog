@@ -1,3 +1,7 @@
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const timezone = document.querySelector("[data-timezone]");
   if (timezone && timezone.value === "UTC") {

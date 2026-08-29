@@ -66,6 +66,14 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   installation and standalone display are useful without requiring offline sync.
 - **Do not implement offline journal sync in the MVP.** Synchronization would add
   substantial state and conflict complexity to an otherwise server-owned journal.
+- **Keep the PWA service worker limited to static presentation assets.** It uses a
+  versioned cache for CSS, JavaScript, icons, and a private-data-free offline page.
+  Authenticated pages, photos, and application data remain network-dependent and
+  are never intentionally cached; there is no second client-side journal database.
+- **Require a secure context for full PWA behavior outside local development.**
+  Browsers allow service workers on localhost, but phone installation and service
+  workers generally require HTTPS. Deployment may provide it through an
+  HTTPS-capable Tailscale setup or reverse proxy rather than TLS in the Go app.
 
 ## Product model
 

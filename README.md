@@ -39,3 +39,16 @@ not part of the MVP.
 Project scope and design are documented in [`docs/PROJECT.md`](docs/PROJECT.md),
 [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/DECISIONS.md`](docs/DECISIONS.md),
 and [`docs/DATABASE.md`](docs/DATABASE.md).
+
+## PWA access
+
+LifeLog can be installed from a supported browser and launched in standalone
+mode. The installation layer caches only static presentation assets; journal
+pages, photos, and writes always require a connection to the LifeLog server.
+
+Browsers treat `localhost` as a secure context for development. A phone may open
+LifeLog from a LAN address such as `http://192.168.x.x:8080`, but service-worker
+and installation behavior is generally restricted on that insecure origin. A
+real phone installation should use HTTPS, provided in a future deployment by an
+HTTPS-capable Tailscale setup or reverse proxy. LifeLog does not terminate TLS or
+configure Tailscale itself.

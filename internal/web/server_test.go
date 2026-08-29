@@ -139,6 +139,46 @@ func (a *testApp) loginProfile(id int64) {
 	a.cookies[sessionCookie] = &http.Cookie{Name: sessionCookie, Value: session.Token}
 }
 
+func TestPWAAssetsAndMetadata(t *testing.T) {
+	a := newTestApp(t)
+
+	tests := []struct {
+		path        string
+		contentType string
+		body        string
+	}{
+		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v1"`},
+		{"/offline.html", "text/html", "Connect to your LifeLog server"},
+	}
+	for _, tt := range tests {
+		w := a.request(http.MethodGet, tt.path, nil)
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), tt.contentType) || !strings.Contains(w.Body.String(), tt.body) {
+			t.Errorf("GET %s: code=%d type=%q body=%s", tt.path, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+		}
+	}
+
+	for _, path := range []string{"/static/icon-192.png", "/static/icon-512.png", "/static/apple-touch-icon.png"} {
+		w := a.request(http.MethodGet, path, nil)
+		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" || len(w.Body.Bytes()) == 0 {
+			t.Errorf("GET %s: code=%d type=%q bytes=%d", path, w.Code, w.Header().Get("Content-Type"), len(w.Body.Bytes()))
+		}
+	}
+
+	w := a.request(http.MethodGet, "/", nil)
+	body := w.Body.String()
+	for _, metadata := range []string{`rel="manifest" href="/manifest.webmanifest"`, `name="theme-color" content="#27684e"`, `rel="apple-touch-icon"`, `viewport-fit=cover`} {
+		if !strings.Contains(body, metadata) {
+			t.Errorf("base HTML missing %q", metadata)
+		}
+	}
+
+	w = a.request(http.MethodGet, "/day/2026-08-29", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("PWA assets changed authentication: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+}
+
 func TestFirstRunCreatesProfileJournalAndSession(t *testing.T) {
 	a := newTestApp(t)
 	token, w := a.getToken("/")

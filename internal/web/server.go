@@ -136,9 +136,19 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/rename", s.renameOption)
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/deactivate", s.deactivateOption)
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/reactivate", s.reactivateOption)
+	mux.HandleFunc("GET /manifest.webmanifest", staticFile("static/manifest.webmanifest", "application/manifest+json; charset=utf-8"))
+	mux.HandleFunc("GET /sw.js", staticFile("static/sw.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /offline.html", staticFile("static/offline.html", "text/html; charset=utf-8"))
 	mux.Handle("GET /static/", http.FileServerFS(webassets.Files))
 	s.handler = s.securityHeaders(mux)
 	return s, nil
+}
+
+func staticFile(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		http.ServeFileFS(w, r, webassets.Files, name)
+	}
 }
 
 var questionTypes = []QuestionTypeView{
