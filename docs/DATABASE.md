@@ -57,6 +57,8 @@ One user owns many journals at the database level. The MVP interface exposes one
 Supported initial types are short text, long text, yes/no, number, scale 1–5,
 scale 1–10, time, select, and multi-select. Once answers exist, the question type
 must not change in place. The old question is deactivated and a new one created.
+Question positions are zero-based. Active questions are shown by position and ID;
+reactivating a question appends it to the end of the active question list.
 
 ### `question_options`
 
@@ -72,6 +74,8 @@ Options belong to select or multi-select questions. Referenced options are
 deactivated rather than deleted. Renaming an option changes the current
 configuration; historical selected answers retain the earlier wording through
 `answer_options.option_label_snapshot`.
+Option positions are zero-based. Active options are shown by position and ID;
+reactivating an option appends it to the end of the active option list.
 
 ### `days`
 
