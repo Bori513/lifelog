@@ -115,6 +115,11 @@ multi-select values use `answer_options` rather than these scalar columns. Exact
 database checks for value/type consistency should be settled with the migrations;
 application validation is required in all cases.
 
+The daily Save input distinguishes an omitted question from an explicitly cleared
+question. Clearing deletes the answer row (and cascades to its selected options)
+rather than storing an empty placeholder. Empty text values and empty select or
+multi-select selections are also treated as clears.
+
 ### `answer_options`
 
 | Field | Notes |
@@ -170,6 +175,13 @@ the current journal configuration but does not rewrite historical wording:
 `answers.question_label_snapshot` preserves the question label and
 `answer_options.option_label_snapshot` preserves each selected option label as
 they existed when the answer was saved.
+
+Editing an existing historical answer preserves its question label snapshot.
+Likewise, a selected option that remains selected preserves its option label
+snapshot; only newly added selections capture the option's current label. An
+inactive question may be edited or cleared when that day already has its answer,
+but it cannot receive a new answer. An inactive option already selected on that
+answer may remain selected or be removed, but cannot be newly selected.
 
 The initial migration cascades deletion of owned records from users through
 journals and their days, and from days through answers and photos. Sessions are
