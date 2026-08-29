@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 
+	"github.com/Bori513/lifelog/internal/search"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,6 +37,10 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply database migrations: %w", err)
+	}
+	if err := search.NewStore(db).Initialize(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("initialize search index: %w", err)
 	}
 
 	return db, nil

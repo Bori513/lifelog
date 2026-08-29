@@ -162,6 +162,46 @@ func TestFirstRunCreatesProfileJournalAndSession(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedSearchPageAndEscaping(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Searcher", "", "UTC")
+	a.loginProfile(p.ID)
+	js, err := a.profiles.ListJournals(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.journal.SaveDay(t.Context(), js[0].ID, "2026-08-28", journal.SaveDayInput{GeneralNote: `<script>alert("x")</script> McDonald's`})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := a.request(http.MethodGet, "/search?q=McDonald%27s", nil)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "Search journal") || !strings.Contains(body, `href="/day/2026-08-28"`) {
+		t.Fatalf("search page code=%d body=%s", w.Code, body)
+	}
+	if strings.Contains(body, "<script>alert") || !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("search result was not escaped: %s", body)
+	}
+	if !strings.Contains(body, `value="McDonald&#39;s"`) {
+		t.Fatalf("query was not preserved safely: %s", body)
+	}
+	w = a.request(http.MethodGet, "/search?q=absent", nil)
+	if !strings.Contains(w.Body.String(), "No matching journal entries.") {
+		t.Fatal("no-match state missing")
+	}
+	w = a.request(http.MethodGet, "/search", nil)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "No matching journal entries.") {
+		t.Fatal("empty search state invalid")
+	}
+
+	b := newTestApp(t)
+	w = b.request(http.MethodGet, "/search", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatal("unauthenticated search was not protected")
+	}
+}
+
 func TestProfileSelectionAndPINLogin(t *testing.T) {
 	a := newTestApp(t)
 	open := a.create("Open", "", "UTC")

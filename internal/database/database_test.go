@@ -24,7 +24,7 @@ func TestOpenInitializesDatabase(t *testing.T) {
 
 	wantTables := []string{
 		"schema_migrations", "users", "journals", "questions", "question_options",
-		"days", "answers", "answer_options", "photos", "sessions",
+		"days", "answers", "answer_options", "photos", "sessions", "search_documents", "search_fts",
 	}
 	for _, table := range wantTables {
 		var name string
@@ -50,8 +50,15 @@ func TestOpenInitializesDatabase(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("count migrations after second run: %v", err)
 	}
-	if migrationsApplied != 1 {
-		t.Fatalf("migration count after second run = %d, want 1", migrationsApplied)
+	if migrationsApplied != 2 {
+		t.Fatalf("migration count after second run = %d, want 2", migrationsApplied)
+	}
+	if _, err := db.Exec(`INSERT INTO search_fts(rowid, body) VALUES (999, 'FTS5 works')`); err != nil {
+		t.Fatalf("insert FTS document: %v", err)
+	}
+	var matches int
+	if err := db.QueryRow(`SELECT count(*) FROM search_fts WHERE search_fts MATCH 'works'`).Scan(&matches); err != nil || matches != 1 {
+		t.Fatalf("FTS5 MATCH count=%d err=%v", matches, err)
 	}
 }
 

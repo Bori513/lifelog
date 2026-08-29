@@ -34,6 +34,10 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   photo directory as static content.
 - **Treat FTS as rebuildable derived data.** Normal relational journal records are
   the source of truth, so loss or corruption of the index is recoverable.
+- **Index one derived FTS5 document per journal day.** Application code constructs
+  each document from authoritative relational data and historical label snapshots,
+  updates it atomically with a day Save, and can rebuild the full index. Search is
+  scoped in SQL to one journal and orders matches by newest entry date first.
 
 ## Web interface
 

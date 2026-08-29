@@ -1,0 +1,6 @@
+{{define "search.html"}}{{template "head" .}}
+<header class="topbar"><a class="brand compact" href="/today"><span class="brand-mark">L</span><strong>LifeLog</strong></a><a class="text-link" href="/today">Back to journal</a></header>
+<div class="page-heading"><h1>Search journal</h1><p class="muted">Search notes, answers, locations and memories.</p></div>
+<form class="search-form" method="get" action="/search"><label class="sr-only" for="journal-search">Search your journal</label><input id="journal-search" type="search" name="q" value="{{.Query}}" placeholder="Search your journal…" autocomplete="off" autofocus><button class="primary" type="submit">Search</button></form>
+{{if .SearchResults}}<section class="search-results" aria-label="Search results">{{range .SearchResults}}<a class="card search-result" href="/day/{{.Date}}"><strong>{{.DateLabel}}</strong><p>{{.Snippet}}</p></a>{{end}}</section>{{else if .Searched}}<section class="card empty-state"><p>No matching journal entries.</p></section>{{end}}
+{{template "foot" .}}{{end}}

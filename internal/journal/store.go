@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Bori513/lifelog/internal/questions"
+	searchindex "github.com/Bori513/lifelog/internal/search"
 )
 
 type Store struct{ db *sql.DB }
@@ -203,6 +204,9 @@ func (s *Store) SaveDay(ctx context.Context, journalID int64, entryDate string, 
 				}
 			}
 		}
+	}
+	if err := searchindex.RebuildDay(ctx, tx, dayID); err != nil {
+		return Day{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Day{}, fmt.Errorf("commit day save: %w", err)

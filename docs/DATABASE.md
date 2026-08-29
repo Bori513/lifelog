@@ -207,8 +207,18 @@ historical meaning from isolated configuration deletion.
 
 ## Full-text search
 
-Search covers at least text answers, general note, special moment, and location.
-The preferred design builds one normalized search document for each day and
-indexes it with SQLite FTS. Search tables contain derived data only: they can be
-discarded and rebuilt completely from `days`, `answers`, `questions`, and related
-option data. FTS must never become the only copy of journal content.
+`search_documents` contains one deterministic, human-readable derived document
+per journal day. It includes the general note, special moment, location, and all
+stored scalar and selected-option answers. Answer sections use
+`question_label_snapshot`, and selections use `option_label_snapshot`, so search
+retains the wording that belonged to the historical answer.
+
+The external-content SQLite FTS5 table `search_fts` indexes each document body.
+Small triggers on `search_documents` keep that FTS table synchronized; no triggers
+span the authoritative journal tables. Application code rebuilds a day's document
+inside the same transaction that saves the day. A full rebuild deletes all derived
+documents and reconstructs them from `days`, `answers`, and `answer_options`.
+
+Both search tables are derived and rebuildable. Relational journal records remain
+the source of truth and are the data that must be preserved in backups. On upgrade,
+startup populates the index when journal days exist but search documents do not.

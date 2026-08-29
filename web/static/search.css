@@ -1,0 +1,10 @@
+.search-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 20px 0; }
+.search-results { display: grid; gap: 10px; }
+.search-result { color: inherit; text-decoration: none; }
+.search-result p { margin: 0; color: #52615a; white-space: pre-line; }
+.search-result:hover { border-color: #8ea398; }
+@media (max-width: 520px) {
+  .top-actions { gap: 3px; }
+  .top-actions .text-link { font-size: .86rem; }
+  .text-button { font-size: .82rem; padding: 2px; }
+}

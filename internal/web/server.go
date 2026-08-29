@@ -21,6 +21,7 @@ import (
 	"github.com/Bori513/lifelog/internal/photos"
 	"github.com/Bori513/lifelog/internal/profiles"
 	"github.com/Bori513/lifelog/internal/questions"
+	"github.com/Bori513/lifelog/internal/search"
 	webassets "github.com/Bori513/lifelog/web"
 )
 
@@ -36,6 +37,7 @@ type Server struct {
 	questions     *questions.Store
 	journal       *journal.Store
 	photos        *photos.Store
+	search        *search.Store
 	templates     *template.Template
 	secureCookies bool
 	now           func() time.Time
@@ -60,6 +62,9 @@ type QuestionTypeView struct{ Value, Label string }
 type PhotoView struct {
 	ID  int64
 	URL string
+}
+type SearchResultView struct {
+	Date, DateLabel, Snippet string
 }
 type ManageOptionView struct {
 	ID       int64
@@ -87,6 +92,9 @@ type PageData struct {
 	Photos                                         []PhotoView
 	ActiveQuestions, InactiveQuestions             []ManageQuestionView
 	QuestionTypes                                  []QuestionTypeView
+	Query                                          string
+	SearchResults                                  []SearchResultView
+	Searched                                       bool
 }
 
 func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
@@ -103,7 +111,7 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	if err != nil {
 		return nil, fmt.Errorf("parse web templates: %w", err)
 	}
-	s := &Server{profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
+	s := &Server{profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.root)
 	mux.HandleFunc("POST /profiles", s.createProfile)
@@ -113,6 +121,7 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /today", s.today)
+	mux.HandleFunc("GET /search", s.getSearch)
 	mux.HandleFunc("GET /day/{date}", s.getDay)
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
@@ -545,6 +554,33 @@ func (s *Server) getDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderDay(w, r, p, r.PathValue("date"), "")
+}
+func (s *Server) getSearch(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	j, ok := s.defaultJournal(w, r, p)
+	if !ok {
+		return
+	}
+	query := r.URL.Query().Get("q")
+	results, err := s.search.Search(r.Context(), j.ID, query, search.DefaultLimit)
+	if err != nil {
+		s.internal(w, "search journal", err)
+		return
+	}
+	views := make([]SearchResultView, 0, len(results))
+	for _, result := range results {
+		parsed, err := time.Parse("2006-01-02", result.EntryDate)
+		if err != nil {
+			s.internal(w, "format search result date", err)
+			return
+		}
+		views = append(views, SearchResultView{Date: result.EntryDate, DateLabel: parsed.Format("2 January 2006"), Snippet: result.Snippet})
+	}
+	d := PageData{Title: "Search journal", ProfileName: p.Name, Query: query, SearchResults: views, Searched: strings.TrimSpace(query) != ""}
+	s.render(w, "search.html", d)
 }
 func (s *Server) saveDay(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.requireProfile(w, r)
