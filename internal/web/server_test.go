@@ -150,7 +150,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v4"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v5"`},
 		{"/sw.js", "text/javascript", `"/static/appearance-init.js"`},
 		{"/sw.js", "text/javascript", `self.skipWaiting()`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
@@ -287,6 +287,11 @@ func TestSettingsAndAppearanceRoutes(t *testing.T) {
 			t.Errorf("appearance page missing %s control", mode)
 		}
 	}
+	for _, theme := range []string{"lifelog", "neon-pink", "matrix", "warm", "minimal", "midnight", "forest", "lavender"} {
+		if !strings.Contains(body, `data-theme-option="`+theme+`" aria-pressed="false"`) {
+			t.Errorf("appearance page missing accessible %s theme control", theme)
+		}
+	}
 	if strings.Contains(body, "<form") || strings.Contains(body, "csrf_token") {
 		t.Fatal("appearance page introduced server-side preference persistence")
 	}
@@ -330,13 +335,47 @@ func TestAppearanceControlJavaScriptWiring(t *testing.T) {
 	body := w.Body.String()
 	for _, expected := range []string{
 		`document.querySelectorAll("[data-color-mode]")`,
+		`document.querySelectorAll("[data-theme-option]")`,
 		`addEventListener("click"`,
 		`localStorage.setItem("lifelog-color-mode", mode)`,
+		`localStorage.setItem("lifelog-theme", theme)`,
+		`document.documentElement.dataset.theme = theme`,
 		`document.documentElement.dataset.colorScheme = scheme`,
 		`button.setAttribute("aria-pressed"`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("app.js missing appearance behavior %q", expected)
+		}
+	}
+	selectTheme := body[strings.Index(body, "selectTheme(value)"):]
+	selectTheme = selectTheme[:strings.Index(selectTheme, "}};")]
+	if strings.Contains(selectTheme, `localStorage.setItem("lifelog-color-mode"`) {
+		t.Fatal("selecting a theme overwrites color mode")
+	}
+}
+
+func TestAppearanceThemePalettesAndValidation(t *testing.T) {
+	a := newTestApp(t)
+	themes := []string{"lifelog", "neon-pink", "matrix", "warm", "minimal", "midnight", "forest", "lavender"}
+	w := a.request(http.MethodGet, "/static/appearance-init.js", nil)
+	initializer := w.Body.String()
+	w = a.request(http.MethodGet, "/static/app.js", nil)
+	application := w.Body.String()
+	exactList := `new Set(["` + strings.Join(themes, `", "`) + `"])`
+	for name, script := range map[string]string{"initializer": initializer, "application": application} {
+		if !strings.Contains(script, exactList) || !strings.Contains(script, `let theme = "lifelog"`) || !strings.Contains(script, "if (themes.has(storedTheme)) theme = storedTheme") {
+			t.Errorf("%s does not validate the exact theme collection with a LifeLog fallback", name)
+		}
+	}
+
+	w = a.request(http.MethodGet, "/static/app.css", nil)
+	css := w.Body.String()
+	for _, theme := range themes {
+		for _, scheme := range []string{"light", "dark"} {
+			selector := `:root[data-theme="` + theme + `"][data-color-scheme="` + scheme + `"]`
+			if !strings.Contains(css, selector) {
+				t.Errorf("app.css missing palette %s", selector)
+			}
 		}
 	}
 }

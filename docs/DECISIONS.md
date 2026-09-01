@@ -61,10 +61,11 @@ outweighs the project's priority order: simplicity, reliability, speed, features
 - **Use vanilla JavaScript and simple CSS.** The interface does not require a
   frontend framework or Node-based build pipeline.
 - **Keep appearance theme and color mode separate and browser-local.** Semantic
-  CSS tokens define the LifeLog theme. The browser stores only `lifelog` as the
-  theme and System, Light, or Dark as the mode in local storage; System follows
-  `prefers-color-scheme`. Cosmetic preferences are device-local and are not
-  stored in SQLite or associated with a profile.
+  CSS tokens define the LifeLog, Neon Pink, Matrix, Warm, Minimal, Midnight,
+  Forest, and Lavender themes, each in light and dark variants. The browser stores
+  the selected theme and System, Light, or Dark mode in local storage; System
+  follows `prefers-color-scheme`. Cosmetic preferences are device-local and are
+  not stored in SQLite or associated with a profile.
 - **Use database-backed bearer sessions in secure cookies.** The browser stores
   only the plaintext bearer token in an `HttpOnly`, `SameSite=Lax` cookie; the
   database retains only its hash. Cookie transport security is configurable for

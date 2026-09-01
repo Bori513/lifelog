@@ -24,6 +24,7 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [ ] CSV export
 - [ ] ZIP export
 - [x] Manual whole-instance backup UI with optional server destination
+- [x] Browser-local light/dark appearance modes and eight visual themes
 - [ ] Calendar overview
 - [ ] Multiple journals per user in the interface
 - [ ] Voice notes
