@@ -150,7 +150,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v1"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v2"`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
 	}
 	for _, tt := range tests {
@@ -169,7 +169,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 
 	w := a.request(http.MethodGet, "/", nil)
 	body := w.Body.String()
-	for _, metadata := range []string{`rel="manifest" href="/manifest.webmanifest"`, `name="theme-color" content="#27684e"`, `rel="apple-touch-icon"`, `viewport-fit=cover`} {
+	for _, metadata := range []string{`data-theme="lifelog"`, `rel="manifest" href="/manifest.webmanifest"`, `name="theme-color" content="#27684e"`, `rel="apple-touch-icon"`, `viewport-fit=cover`} {
 		if !strings.Contains(body, metadata) {
 			t.Errorf("base HTML missing %q", metadata)
 		}
