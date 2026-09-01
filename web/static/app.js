@@ -2,7 +2,35 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 }
 
+const appearance = (() => {
+  const modes = new Set(["system", "light", "dark"]);
+  const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  let mode = "system";
+  try {
+    const stored = localStorage.getItem("lifelog-color-mode");
+    if (modes.has(stored)) mode = stored;
+  } catch (_) {}
+  const apply = () => {
+    const scheme = mode === "dark" || (mode === "system" && media?.matches) ? "dark" : "light";
+    document.documentElement.dataset.theme = "lifelog";
+    document.documentElement.dataset.colorScheme = scheme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", scheme === "dark" ? "#171a18" : "#27684e");
+    document.querySelectorAll("[data-color-mode]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.colorMode === mode)));
+  };
+  const systemChanged = () => { if (mode === "system") apply(); };
+  if (media?.addEventListener) media.addEventListener("change", systemChanged);
+  else media?.addListener?.(systemChanged);
+  return {apply, select(value) {
+    if (!modes.has(value)) return;
+    mode = value;
+    try { localStorage.setItem("lifelog-theme", "lifelog"); localStorage.setItem("lifelog-color-mode", mode); } catch (_) {}
+    apply();
+  }};
+})();
+
 document.addEventListener("DOMContentLoaded", () => {
+  appearance.apply();
+  document.querySelectorAll("[data-color-mode]").forEach(button => button.addEventListener("click", () => appearance.select(button.dataset.colorMode)));
   const timezone = document.querySelector("[data-timezone]");
   if (timezone && timezone.value === "UTC") {
     try { timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (_) {}

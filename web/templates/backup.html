@@ -1,5 +1,5 @@
 {{define "backup.html"}}{{template "head" .}}
-<header class="topbar"><a class="brand compact" href="/today"><span class="brand-mark">L</span><strong>LifeLog</strong></a><a class="text-link" href="/today">Back to journal</a></header>
+<header class="topbar"><a class="brand compact" href="/today"><span class="brand-mark">L</span><strong>LifeLog</strong></a><a class="text-link" href="/settings">Back to settings</a></header>
 <div class="page-heading"><h1>Backup</h1><p class="muted">Create a backup of the entire LifeLog instance, including every profile and photo.</p></div>
 {{if .BackupMessage}}<p class="notice success" role="status">{{.BackupMessage}}</p>{{end}}
 <section class="card"><h2>Download backup</h2><p>Create a complete ZIP backup and download it to this device.</p><form method="post" action="/settings/backup/download"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button class="primary" type="submit">Create &amp; Download Backup</button></form></section>

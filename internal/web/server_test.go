@@ -150,8 +150,11 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v2"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v4"`},
+		{"/sw.js", "text/javascript", `"/static/appearance-init.js"`},
+		{"/sw.js", "text/javascript", `self.skipWaiting()`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
+		{"/static/appearance-init.js", "text/javascript", `localStorage.getItem("lifelog-color-mode")`},
 	}
 	for _, tt := range tests {
 		w := a.request(http.MethodGet, tt.path, nil)
@@ -255,6 +258,86 @@ func TestBackupRoutesAuthenticationCSRFDownloadAndConfiguration(t *testing.T) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), ".zip") {
 		t.Fatalf("server files=%v err=%v", entries, err)
+	}
+}
+
+func TestSettingsAndAppearanceRoutes(t *testing.T) {
+	a := newTestApp(t)
+	for _, path := range []string{"/settings", "/settings/appearance"} {
+		w := a.request(http.MethodGet, path, nil)
+		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+			t.Fatalf("unauthenticated %s: code=%d location=%q", path, w.Code, w.Header().Get("Location"))
+		}
+	}
+
+	p := a.create("Settings user", "", "UTC")
+	a.loginProfile(p.ID)
+	w := a.request(http.MethodGet, "/settings", nil)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "<h1>Settings</h1>") || !strings.Contains(body, `href="/settings/appearance"`) || !strings.Contains(body, `href="/settings/backup"`) {
+		t.Fatalf("settings page: code=%d body=%s", w.Code, body)
+	}
+	w = a.request(http.MethodGet, "/settings/appearance", nil)
+	body = w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "<h1>Appearance</h1>") || !strings.Contains(body, `src="/static/app.js" defer`) {
+		t.Fatalf("appearance page: code=%d body=%s", w.Code, body)
+	}
+	for _, mode := range []string{"system", "light", "dark"} {
+		if !strings.Contains(body, `data-color-mode="`+mode+`"`) {
+			t.Errorf("appearance page missing %s control", mode)
+		}
+	}
+	if strings.Contains(body, "<form") || strings.Contains(body, "csrf_token") {
+		t.Fatal("appearance page introduced server-side preference persistence")
+	}
+}
+
+func TestAppearanceScriptsAreExternalAndCSPCompatible(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Journal user", "", "UTC")
+	a.loginProfile(p.ID)
+	w := a.request(http.MethodGet, "/day/2026-09-01", nil)
+	body := w.Body.String()
+	initializer := strings.Index(body, `src="/static/appearance-init.js"`)
+	stylesheet := strings.Index(body, `href="/static/app.css"`)
+	if initializer < 0 || stylesheet < 0 || initializer > stylesheet {
+		t.Fatalf("appearance initializer must precede stylesheet: initializer=%d stylesheet=%d", initializer, stylesheet)
+	}
+	if strings.Contains(body, "<script>") || strings.Contains(body, "onclick=") || strings.Contains(body, "onchange=") || strings.Contains(body, "oninput=") {
+		t.Fatal("base HTML contains inline appearance JavaScript")
+	}
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "'unsafe-inline'") {
+		t.Fatalf("CSP is not strict: %q", csp)
+	}
+	if !strings.Contains(body, `href="/settings"`) || strings.Contains(body, `href="/settings/backup">Backup`) {
+		t.Fatal("journal settings navigation is incorrect")
+	}
+
+	w = a.request(http.MethodGet, "/offline.html", nil)
+	offline := w.Body.String()
+	if !strings.Contains(offline, `src="/static/appearance-init.js"`) || strings.Contains(offline, "<script>") {
+		t.Fatalf("offline appearance initialization is not CSP-safe: %s", offline)
+	}
+	if strings.Index(offline, `src="/static/appearance-init.js"`) > strings.Index(offline, `href="/static/app.css"`) {
+		t.Fatal("offline appearance initializer loads after its stylesheet")
+	}
+}
+
+func TestAppearanceControlJavaScriptWiring(t *testing.T) {
+	a := newTestApp(t)
+	w := a.request(http.MethodGet, "/static/app.js", nil)
+	body := w.Body.String()
+	for _, expected := range []string{
+		`document.querySelectorAll("[data-color-mode]")`,
+		`addEventListener("click"`,
+		`localStorage.setItem("lifelog-color-mode", mode)`,
+		`document.documentElement.dataset.colorScheme = scheme`,
+		`button.setAttribute("aria-pressed"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("app.js missing appearance behavior %q", expected)
+		}
 	}
 }
 

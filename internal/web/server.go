@@ -138,6 +138,8 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
 	mux.HandleFunc("GET /questions", s.getQuestions)
+	mux.HandleFunc("GET /settings", s.getSettings)
+	mux.HandleFunc("GET /settings/appearance", s.getAppearance)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
 	mux.HandleFunc("POST /settings/backup/download", s.downloadBackup)
 	mux.HandleFunc("POST /settings/backup/server", s.serverBackup)
@@ -159,6 +161,22 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.Handle("GET /static/", http.FileServerFS(webassets.Files))
 	s.handler = s.securityHeaders(mux)
 	return s, nil
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	s.render(w, "settings.html", PageData{Title: "Settings", ProfileName: p.Name})
+}
+
+func (s *Server) getAppearance(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	s.render(w, "appearance.html", PageData{Title: "Appearance", ProfileName: p.Name})
 }
 
 func (s *Server) getBackup(w http.ResponseWriter, r *http.Request) {

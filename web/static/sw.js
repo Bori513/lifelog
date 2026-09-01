@@ -1,18 +1,20 @@
-const CACHE_NAME = "lifelog-static-v2";
+const CACHE_NAME = "lifelog-static-v4";
 const STATIC_ASSETS = [
   "/offline.html",
   "/static/app.css",
   "/static/app.js",
+  "/static/appearance-init.js",
   "/static/questions.css",
   "/static/photos.css",
   "/static/search.css",
+  "/static/settings.css",
   "/static/icon-192.png",
   "/static/icon-512.png",
   "/static/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", event => {
