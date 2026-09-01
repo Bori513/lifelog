@@ -23,7 +23,7 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [ ] JSON export
 - [ ] CSV export
 - [ ] ZIP export
-- [ ] Backup UI and/or CLI
+- [x] Manual whole-instance backup UI with optional server destination
 - [ ] Calendar overview
 - [ ] Multiple journals per user in the interface
 - [ ] Voice notes

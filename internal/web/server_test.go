@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Bori513/lifelog/internal/backup"
 	"github.com/Bori513/lifelog/internal/database"
 	"github.com/Bori513/lifelog/internal/journal"
 	"github.com/Bori513/lifelog/internal/photos"
@@ -203,6 +205,56 @@ func TestHealthReportsUnavailableDatabase(t *testing.T) {
 	w := a.request(http.MethodGet, "/healthz", nil)
 	if w.Code != http.StatusServiceUnavailable || w.Body.String() != "unavailable\n" {
 		t.Fatalf("health response: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+func TestBackupRoutesAuthenticationCSRFDownloadAndConfiguration(t *testing.T) {
+	a := newTestApp(t)
+	w := a.request(http.MethodGet, "/settings/backup", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("unauthenticated backup page: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+	w = a.request(http.MethodPost, "/settings/backup/download", url.Values{})
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("unauthenticated download: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+
+	p := a.create("Backup user", "", "UTC")
+	a.loginProfile(p.ID)
+	token, w := a.getToken("/settings/backup")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Create &amp; Download Backup") || !strings.Contains(w.Body.String(), "Server backups are not configured") {
+		t.Fatalf("backup page: code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = a.request(http.MethodPost, "/settings/backup/download", url.Values{})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("download without CSRF = %d", w.Code)
+	}
+	w = a.request(http.MethodGet, "/settings/backup/download", nil)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET download = %d", w.Code)
+	}
+	w = a.request(http.MethodPost, "/settings/backup/download", url.Values{"csrf_token": {token}})
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/zip" || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Content-Disposition"), "lifelog-backup-") || !bytes.HasPrefix(w.Body.Bytes(), []byte("PK")) {
+		t.Fatalf("download: code=%d type=%q cache=%q disposition=%q bytes=%d", w.Code, w.Header().Get("Content-Type"), w.Header().Get("Cache-Control"), w.Header().Get("Content-Disposition"), w.Body.Len())
+	}
+
+	w = a.request(http.MethodPost, "/settings/backup/server", url.Values{"csrf_token": {token}})
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured server backup = %d", w.Code)
+	}
+	backupDir := t.TempDir()
+	a.s.backups = backup.New(a.s.db, a.dataDir, backupDir)
+	token, w = a.getToken("/settings/backup")
+	if !strings.Contains(w.Body.String(), "Create Backup on Server") {
+		t.Fatalf("configured server action missing: %s", w.Body.String())
+	}
+	w = a.request(http.MethodPost, "/settings/backup/server", url.Values{"csrf_token": {token}})
+	if w.Code != http.StatusSeeOther || !strings.HasPrefix(w.Header().Get("Location"), "/settings/backup?created=lifelog-backup-") {
+		t.Fatalf("server backup: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil || len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), ".zip") {
+		t.Fatalf("server files=%v err=%v", entries, err)
 	}
 }
 

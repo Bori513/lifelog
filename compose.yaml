@@ -9,4 +9,5 @@ services:
       LIFELOG_DATA_DIR: /data
       LIFELOG_ADDR: :8080
       LIFELOG_SECURE_COOKIES: "false"
+      LIFELOG_BACKUP_DIR: ${LIFELOG_BACKUP_DIR:-}
     restart: unless-stopped

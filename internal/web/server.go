@@ -8,15 +8,18 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Bori513/lifelog/internal/backup"
 	"github.com/Bori513/lifelog/internal/journal"
 	"github.com/Bori513/lifelog/internal/photos"
 	"github.com/Bori513/lifelog/internal/profiles"
@@ -39,6 +42,7 @@ type Server struct {
 	journal       *journal.Store
 	photos        *photos.Store
 	search        *search.Store
+	backups       *backup.Manager
 	templates     *template.Template
 	secureCookies bool
 	now           func() time.Time
@@ -96,9 +100,15 @@ type PageData struct {
 	Query                                          string
 	SearchResults                                  []SearchResultView
 	Searched                                       bool
+	ServerBackupConfigured                         bool
+	BackupMessage                                  string
 }
 
 func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
+	return NewConfigured(db, dataDir, "", secureCookies, logger)
+}
+
+func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -112,7 +122,7 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	if err != nil {
 		return nil, fmt.Errorf("parse web templates: %w", err)
 	}
-	s := &Server{db: db, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
+	s := &Server{db: db, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), backups: backup.New(db, dataDir, backupDir), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /", s.root)
@@ -128,6 +138,11 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
 	mux.HandleFunc("GET /questions", s.getQuestions)
+	mux.HandleFunc("GET /settings/backup", s.getBackup)
+	mux.HandleFunc("POST /settings/backup/download", s.downloadBackup)
+	mux.HandleFunc("POST /settings/backup/server", s.serverBackup)
+	mux.HandleFunc("GET /settings/backup/download", methodNotAllowed)
+	mux.HandleFunc("GET /settings/backup/server", methodNotAllowed)
 	mux.HandleFunc("POST /questions", s.createQuestion)
 	mux.HandleFunc("POST /questions/reorder", s.reorderQuestions)
 	mux.HandleFunc("POST /questions/{id}/rename", s.renameQuestion)
@@ -144,6 +159,87 @@ func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*S
 	mux.Handle("GET /static/", http.FileServerFS(webassets.Files))
 	s.handler = s.securityHeaders(mux)
 	return s, nil
+}
+
+func (s *Server) getBackup(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	message := ""
+	if name := r.URL.Query().Get("created"); name != "" {
+		message = "Backup created on the server: " + filepath.Base(name)
+	}
+	s.render(w, "backup.html", PageData{Title: "Backup", ProfileName: p.Name, CSRF: s.csrfToken(w, r), ServerBackupConfigured: s.backups.ServerAvailable(), BackupMessage: message})
+}
+
+func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) backupPost(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := s.requireProfile(w, r); !ok {
+		return false
+	}
+	if !s.parseForm(w, r) || !s.validCSRF(r) {
+		http.Error(w, "Invalid form token.", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
+	if !s.backupPost(w, r) {
+		return
+	}
+	artifact, err := s.backups.CreateDownload(r.Context())
+	if errors.Is(err, backup.ErrInProgress) {
+		http.Error(w, "A backup is already in progress.", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		s.internal(w, "create downloadable backup", err)
+		return
+	}
+	defer artifact.Cleanup()
+	file, err := os.Open(artifact.Path)
+	if err != nil {
+		s.internal(w, "open completed backup", err)
+		return
+	}
+	defer file.Close()
+	// The archive is complete at this point. Allow only its network transfer to
+	// exceed the server's normal response write timeout on slow links.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		s.logger.Printf("disable backup download write deadline: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, artifact.Filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.FormatInt(artifact.Size, 10))
+	if _, err := io.Copy(w, file); err != nil {
+		s.logger.Printf("send backup download: %v", err)
+	}
+}
+
+func (s *Server) serverBackup(w http.ResponseWriter, r *http.Request) {
+	if !s.backupPost(w, r) {
+		return
+	}
+	name, err := s.backups.CreateServer(r.Context())
+	if errors.Is(err, backup.ErrUnavailable) {
+		http.Error(w, "Server backups are not configured.", http.StatusServiceUnavailable)
+		return
+	}
+	if errors.Is(err, backup.ErrInProgress) {
+		http.Error(w, "A backup is already in progress.", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		s.internal(w, "create server backup", err)
+		return
+	}
+	http.Redirect(w, r, "/settings/backup?created="+url.QueryEscape(name), http.StatusSeeOther)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

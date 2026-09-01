@@ -69,7 +69,7 @@ The MVP does not include:
 - PostgreSQL, Redis, an ORM, GraphQL, background workers, or microservices;
 - offline editing or synchronization;
 - AI, semantic search, or natural-language journal queries;
-- preset modules, exports, a backup UI, calendar overview, multiple journals in
+- preset modules, general-purpose data exports, calendar overview, multiple journals in
   the interface, voice notes, or general attachments.
 
 ## Technical direction
@@ -102,6 +102,11 @@ data/
 
 A durable backup is fundamentally the SQLite database plus the photos directory
 and any required local configuration.
+
+LifeLog provides manual whole-instance ZIP backups. Backup creation uses a
+standalone SQLite snapshot and validates that every photo referenced by that
+snapshot is present in the archive. Restore remains an offline, manual operator
+procedure rather than a web action.
 
 ## Long-term principles
 

@@ -38,6 +38,12 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   each document from authoritative relational data and historical label snapshots,
   updates it atomically with a day Save, and can rebuild the full index. Search is
   scoped in SQL to one journal and orders matches by newest entry date first.
+- **Create whole-instance backups from a SQLite snapshot plus filesystem photos.**
+  Backup creation uses `VACUUM INTO`, reads photo references from that snapshot,
+  streams the complete photos tree into a temporary ZIP, and succeeds only when
+  every referenced photo was included. One process-wide non-blocking guard limits
+  backup creation to one operation. Optional server backups publish with a final
+  same-filesystem rename only after the archive is complete.
 
 ## Web interface
 
@@ -46,6 +52,10 @@ outweighs the project's priority order: simplicity, reliability, speed, features
 - **Use the standard library HTTP server and router.** `net/http` provides the
   small route set and server safety controls needed by the application without
   adding a framework dependency.
+- **Relax the HTTP write deadline only for completed backup downloads.** Normal
+  responses retain the global write timeout. Once a backup ZIP is fully created,
+  its handler clears that response's write deadline through `http.ResponseController`
+  so a slow link does not truncate the download.
 - **Embed templates and static assets in the application binary.** The web UI
   has no separate runtime asset deployment or frontend build step.
 - **Use vanilla JavaScript and simple CSS.** The interface does not require a

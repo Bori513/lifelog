@@ -66,9 +66,49 @@ no journal data.
 ## Data, backups, and moving hosts
 
 The persistent state is `data/journal.db` (including SQLite WAL/SHM sidecars while
-running) and `data/photos/`. Stop the container with `docker compose down` before
-a simple filesystem backup; copying only `journal.db` while LifeLog is writing in
-WAL mode is not a safe backup procedure.
+running) and `data/photos/`. An authenticated user can open **Backup** from the
+journal and create a full-instance ZIP download. LifeLog creates the archived
+`journal.db` with SQLite `VACUUM INTO`, so it is a standalone consistent snapshot;
+the live WAL and SHM files are deliberately not archived. The ZIP also contains
+the complete `photos/` tree and a minimal `backup-info.json` manifest.
+
+Server-side backups are optional. Set `LIFELOG_BACKUP_DIR=/backup` and explicitly
+bind-mount a host directory at `/backup`, for example:
+
+```yaml
+services:
+  lifelog:
+    volumes:
+      - ./data:/data
+      - /path/on/host/lifelog-backups:/backup
+    environment:
+      LIFELOG_BACKUP_DIR: /backup
+```
+
+LifeLog will not create a missing configured backup directory. This prevents a
+missing external mount from being mistaken for durable backup storage. Existing
+deployments need no configuration change: browser downloads work when the setting
+is empty, while the server-backup action remains unavailable. For protection from
+disk failure, place server backups on a different physical disk or device from
+the primary data. Completed ZIP files are ordinary standalone artifacts suitable
+for copying or later rsync to another machine.
+
+### Manual restore
+
+There is intentionally no web restore action.
+
+1. Stop LifeLog. Never restore into a running instance.
+2. Move or copy the current persistent data directory somewhere safe.
+3. Extract the backup ZIP and open its `lifelog-backup/` directory.
+4. Put the archived `journal.db` and `photos/` directory in LifeLog's persistent
+   data directory (normally the host directory mounted at `/data`).
+5. Ensure the files are readable and writable by the container/application.
+6. Start LifeLog and verify that `GET /healthz` returns `ok`.
+7. Sign in and verify journal entries and photos.
+
+The archived database is standalone. Archived WAL or SHM files are not needed and
+are not present. For a stopped, simple filesystem backup instead, copy the complete
+data directory; copying only live `journal.db` in WAL mode is unsafe.
 
 To move between AMD64 and ARM64 machines, stop LifeLog, copy the complete `data/`
 directory, and start LifeLog on the destination. SQLite needs no architecture
