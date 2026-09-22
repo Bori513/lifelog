@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Bori513/lifelog/internal/database"
 	"github.com/Bori513/lifelog/internal/journal"
@@ -228,6 +229,83 @@ func TestIsolationAndPagination(t *testing.T) {
 	other := newProfileJournal(t, f)
 	if got, err := f.browse.ListDays(t.Context(), other, Filter{QuestionID: q.ID, Operator: OperatorEqual, Value: "true"}); !errors.Is(err, ErrInvalidFilter) || len(got.Days) != 0 {
 		t.Fatalf("cross-journal result=%+v err=%v", got, err)
+	}
+}
+
+func TestListMonthDaysProjectsEntriesAndFilterMatches(t *testing.T) {
+	f := newFixture(t)
+	q := f.question("Exercise", questions.QuestionTypeBoolean)
+	yes, no := true, false
+	f.save("2026-09-01", journal.AnswerInput{QuestionID: q.ID, BoolValue: &yes})
+	f.save("2026-09-02", journal.AnswerInput{QuestionID: q.ID, BoolValue: &no})
+	f.save("2026-09-03")
+	day, err := f.journal.SaveDay(t.Context(), f.journalID, "2026-09-04", journal.SaveDayInput{SpecialMoment: "A highlight"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.browse.db.ExecContext(t.Context(), `INSERT INTO photos(day_id, relative_path, original_filename, mime_type, file_size, created_at) VALUES (?, ?, ?, ?, ?, ?)`, day.ID, "photos/test.jpg", "test.jpg", "image/jpeg", 10, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	days, active, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-09-01", "2026-09-30", Filter{QuestionID: q.ID, Operator: OperatorEqual, Value: "true"})
+	if err != nil || !active || len(days) != 4 {
+		t.Fatalf("days=%+v active=%v err=%v", days, active, err)
+	}
+	if !days[0].MatchesFilter || days[1].MatchesFilter || days[2].MatchesFilter {
+		t.Fatalf("boolean match projection=%+v", days)
+	}
+	noDays, _, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-09-01", "2026-09-30", Filter{QuestionID: q.ID, Operator: OperatorEqual, Value: "false"})
+	if err != nil || noDays[0].MatchesFilter || !noDays[1].MatchesFilter || noDays[2].MatchesFilter {
+		t.Fatalf("boolean no/unanswered projection=%+v err=%v", noDays, err)
+	}
+	if !days[3].HasPhotos || !days[3].HasSpecialMoment {
+		t.Fatalf("entry indicators=%+v", days[3])
+	}
+	unfiltered, active, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-09-01", "2026-09-30", Filter{})
+	if err != nil || active || len(unfiltered) != 4 {
+		t.Fatalf("unfiltered=%+v active=%v err=%v", unfiltered, active, err)
+	}
+	other := newProfileJournal(t, f)
+	isolated, _, err := f.browse.ListMonthDays(t.Context(), other, "2026-09-01", "2026-09-30", Filter{})
+	if err != nil || len(isolated) != 0 {
+		t.Fatalf("cross-journal month=%+v err=%v", isolated, err)
+	}
+}
+
+func TestListMonthDaysUsesBrowseTextNumberAndOptionFilters(t *testing.T) {
+	f := newFixture(t)
+	textQ := f.question("Text", questions.QuestionTypeShortText)
+	numberQ := f.question("Number", questions.QuestionTypeNumber)
+	selectQ := f.question("Mood", questions.QuestionTypeSelect)
+	selected := f.option(selectQ.ID, "Good")
+	multiQ := f.question("Activities", questions.QuestionTypeMultiSelect)
+	multiSelected := f.option(multiQ.ID, "Walk")
+	f.save("2026-10-01", journal.AnswerInput{QuestionID: textQ.ID, TextValue: text("hello world")}, journal.AnswerInput{QuestionID: numberQ.ID, NumberValue: number(8)}, journal.AnswerInput{QuestionID: selectQ.ID, OptionIDs: []int64{selected.ID}}, journal.AnswerInput{QuestionID: multiQ.ID, OptionIDs: []int64{multiSelected.ID}})
+	f.save("2026-10-02")
+	if err := f.questions.RenameOption(t.Context(), f.journalID, selectQ.ID, selected.ID, questions.RenameOptionInput{Label: "Great"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.questions.DeactivateOption(t.Context(), f.journalID, selectQ.ID, selected.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.questions.DeactivateQuestion(t.Context(), f.journalID, selectQ.ID); err != nil {
+		t.Fatal(err)
+	}
+	filters := []Filter{
+		{QuestionID: textQ.ID, Operator: OperatorContains, Value: "world"},
+		{QuestionID: numberQ.ID, Operator: OperatorGreater, Value: "5"},
+		{QuestionID: selectQ.ID, OptionID: selected.ID},
+		{QuestionID: multiQ.ID, OptionID: multiSelected.ID},
+	}
+	for _, filter := range filters {
+		days, active, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-10-01", "2026-10-31", filter)
+		if err != nil || !active || len(days) != 2 || !days[0].MatchesFilter || days[1].MatchesFilter {
+			t.Fatalf("filter=%+v days=%+v active=%v err=%v", filter, days, active, err)
+		}
+	}
+	empty, active, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-10-01", "2026-10-31", Filter{QuestionID: textQ.ID, Operator: OperatorEmpty})
+	if err != nil || !active || empty[0].MatchesFilter || !empty[1].MatchesFilter {
+		t.Fatalf("empty semantics=%+v active=%v err=%v", empty, active, err)
 	}
 }
 

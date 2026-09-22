@@ -1,4 +1,4 @@
-const CACHE_NAME = "lifelog-static-v6";
+const CACHE_NAME = "lifelog-static-v7";
 const STATIC_ASSETS = [
   "/offline.html",
   "/static/app.css",
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
   "/static/photos.css",
   "/static/search.css",
   "/static/browse.css",
+  "/static/calendar.css",
   "/static/settings.css",
   "/static/icon-192.png",
   "/static/icon-512.png",

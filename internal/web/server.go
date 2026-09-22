@@ -88,6 +88,11 @@ type BrowseDayView struct {
 	Date, DateLabel, GeneralNote, SpecialMoment, Location string
 	HasPhotos                                             bool
 }
+type CalendarDayView struct {
+	Date, Day, Label                string
+	Blank, HasEntry, Matches, Today bool
+	HasPhotos, HasSpecialMoment     bool
+}
 type ManageOptionView struct {
 	ID       int64
 	Label    string
@@ -126,6 +131,12 @@ type PageData struct {
 	BrowseTotal                                       int
 	BrowseApplied                                     bool
 	PreviousPageURL, NextPageURL                      string
+	FilterClearURL                                    string
+	CalendarMonth, CalendarMonthLabel                 string
+	CalendarPreviousURL, CalendarNextURL              string
+	CalendarTodayURL                                  string
+	CalendarFilterActive                              bool
+	CalendarDays                                      []CalendarDayView
 }
 
 func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
@@ -159,6 +170,7 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.HandleFunc("GET /today", s.today)
 	mux.HandleFunc("GET /search", s.getSearch)
 	mux.HandleFunc("GET /browse", s.getBrowse)
+	mux.HandleFunc("GET /calendar", s.getCalendar)
 	mux.HandleFunc("GET /day/{date}", s.getDay)
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
@@ -758,13 +770,7 @@ func (s *Server) getBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 	filter, parseErr := parseBrowseFilter(r)
 	d := PageData{Title: "Browse journal", ProfileName: p.Name, BrowseFrom: filter.From, BrowseTo: filter.To, BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
-	for _, q := range available {
-		v := BrowseQuestionView{ID: q.ID, Label: q.Label, Type: string(q.Type), Active: q.Active, Selected: q.ID == filter.QuestionID}
-		for _, o := range q.Options {
-			v.Options = append(v.Options, BrowseOptionView{ID: o.ID, Label: o.Label, Active: o.Active})
-		}
-		d.BrowseQuestions = append(d.BrowseQuestions, v)
-	}
+	setBrowseQuestions(&d, available, filter.QuestionID)
 	if parseErr != nil {
 		d.Error = parseErr.Error()
 		s.render(w, "browse.html", d)
@@ -799,9 +805,93 @@ func (s *Server) getBrowse(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "browse.html", d)
 }
 
+func (s *Server) getCalendar(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	j, ok := s.defaultJournal(w, r, p)
+	if !ok {
+		return
+	}
+	loc, err := time.LoadLocation(p.Timezone)
+	if err != nil {
+		s.internal(w, "load profile timezone", err)
+		return
+	}
+	today := s.now().In(loc)
+	month, monthErr := parseCalendarMonth(r.URL.Query().Get("month"), today)
+	filter, parseErr := parseQuestionFilter(r.URL.Query())
+	d := PageData{Title: "Calendar", ProfileName: p.Name, CalendarMonth: month.Format("2006-01"), CalendarMonthLabel: month.Format("January 2006"), FilterClearURL: "/calendar?month=" + month.Format("2006-01"), BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
+	available, err := s.browse.ListQuestions(r.Context(), j.ID)
+	if err != nil {
+		s.internal(w, "load calendar questions", err)
+		return
+	}
+	setBrowseQuestions(&d, available, filter.QuestionID)
+	if monthErr != nil {
+		d.Error = "Please choose a valid calendar month."
+		s.render(w, "calendar.html", d)
+		return
+	}
+	if parseErr != nil {
+		d.Error = parseErr.Error()
+		s.render(w, "calendar.html", d)
+		return
+	}
+	from := month.Format("2006-01-02")
+	last := month.AddDate(0, 1, -1)
+	monthDays, active, err := s.browse.ListMonthDays(r.Context(), j.ID, from, last.Format("2006-01-02"), filter)
+	if errors.Is(err, browsepkg.ErrInvalidFilter) {
+		d.Error = "Please check the selected question filter."
+		s.render(w, "calendar.html", d)
+		return
+	}
+	if err != nil {
+		s.internal(w, "load calendar month", err)
+		return
+	}
+	d.CalendarFilterActive = active
+	params := calendarFilterValues(r.URL.Query())
+	d.CalendarPreviousURL = calendarMonthURL(month.AddDate(0, -1, 0), params)
+	d.CalendarNextURL = calendarMonthURL(month.AddDate(0, 1, 0), params)
+	d.CalendarTodayURL = calendarMonthURL(time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, loc), params)
+	byDate := make(map[string]browsepkg.MonthDay, len(monthDays))
+	for _, day := range monthDays {
+		byDate[day.EntryDate] = day
+	}
+	d.CalendarDays = buildCalendarDays(month, today, byDate)
+	s.render(w, "calendar.html", d)
+}
+
+func setBrowseQuestions(d *PageData, available []browsepkg.Question, selected int64) {
+	for _, q := range available {
+		v := BrowseQuestionView{ID: q.ID, Label: q.Label, Type: string(q.Type), Active: q.Active, Selected: q.ID == selected}
+		for _, o := range q.Options {
+			v.Options = append(v.Options, BrowseOptionView{ID: o.ID, Label: o.Label, Active: o.Active})
+		}
+		d.BrowseQuestions = append(d.BrowseQuestions, v)
+	}
+}
+
 func parseBrowseFilter(r *http.Request) (browsepkg.Filter, error) {
 	q := r.URL.Query()
-	f := browsepkg.Filter{From: q.Get("from"), To: q.Get("to"), Operator: browsepkg.Operator(q.Get("op")), Value: q.Get("value"), Page: 1}
+	f, err := parseQuestionFilter(q)
+	f.From, f.To, f.Page = q.Get("from"), q.Get("to"), 1
+	if err != nil {
+		return f, err
+	}
+	if raw := q.Get("page"); raw != "" {
+		f.Page, err = strconv.Atoi(raw)
+		if err != nil || f.Page < 1 || f.Page > 1_000_000 {
+			return f, errors.New("Please choose a valid results page.")
+		}
+	}
+	return f, nil
+}
+
+func parseQuestionFilter(q url.Values) (browsepkg.Filter, error) {
+	f := browsepkg.Filter{Operator: browsepkg.Operator(q.Get("op")), Value: q.Get("value")}
 	var err error
 	if raw := q.Get("question"); raw != "" {
 		f.QuestionID, err = strconv.ParseInt(raw, 10, 64)
@@ -815,13 +905,56 @@ func parseBrowseFilter(r *http.Request) (browsepkg.Filter, error) {
 			return f, errors.New("Please choose a valid option.")
 		}
 	}
-	if raw := q.Get("page"); raw != "" {
-		f.Page, err = strconv.Atoi(raw)
-		if err != nil || f.Page < 1 || f.Page > 1_000_000 {
-			return f, errors.New("Please choose a valid results page.")
+	return f, nil
+}
+
+func parseCalendarMonth(value string, now time.Time) (time.Time, error) {
+	if value == "" {
+		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()), nil
+	}
+	parsed, err := time.ParseInLocation("2006-01", value, now.Location())
+	if err != nil || parsed.Format("2006-01") != value {
+		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()), errors.New("invalid month")
+	}
+	return parsed, nil
+}
+
+func buildCalendarDays(month, today time.Time, entries map[string]browsepkg.MonthDay) []CalendarDayView {
+	leading := (int(month.Weekday()) + 6) % 7
+	count := month.AddDate(0, 1, -1).Day()
+	cells := make([]CalendarDayView, 0, leading+count+6)
+	for i := 0; i < leading; i++ {
+		cells = append(cells, CalendarDayView{Blank: true})
+	}
+	for day := 1; day <= count; day++ {
+		date := month.AddDate(0, 0, day-1)
+		key := date.Format("2006-01-02")
+		entry, exists := entries[key]
+		cells = append(cells, CalendarDayView{Date: key, Day: strconv.Itoa(day), Label: date.Format("Monday, 2 January 2006"), HasEntry: exists, Matches: exists && entry.MatchesFilter, Today: key == today.Format("2006-01-02"), HasPhotos: entry.HasPhotos, HasSpecialMoment: entry.HasSpecialMoment})
+	}
+	for len(cells)%7 != 0 {
+		cells = append(cells, CalendarDayView{Blank: true})
+	}
+	return cells
+}
+
+func calendarFilterValues(values url.Values) url.Values {
+	result := url.Values{}
+	for _, key := range []string{"question", "op", "value", "option"} {
+		if value := values.Get(key); value != "" {
+			result.Set(key, value)
 		}
 	}
-	return f, nil
+	return result
+}
+
+func calendarMonthURL(month time.Time, params url.Values) string {
+	copy := url.Values{}
+	for key, values := range params {
+		copy[key] = append([]string(nil), values...)
+	}
+	copy.Set("month", month.Format("2006-01"))
+	return "/calendar?" + copy.Encode()
 }
 
 func browsePageURL(values url.Values, page int) string {

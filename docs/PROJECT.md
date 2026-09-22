@@ -69,7 +69,7 @@ The MVP does not include:
 - PostgreSQL, Redis, an ORM, GraphQL, background workers, or microservices;
 - offline editing or synchronization;
 - AI, semantic search, or natural-language journal queries;
-- preset modules, general-purpose data exports, calendar overview, multiple journals in
+- preset modules, general-purpose data exports, multiple journals in
   the interface, voice notes, or general attachments.
 
 ## Technical direction

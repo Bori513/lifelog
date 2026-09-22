@@ -150,9 +150,10 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v6"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v7"`},
 		{"/sw.js", "text/javascript", `"/static/appearance-init.js"`},
 		{"/sw.js", "text/javascript", `"/static/browse.css"`},
+		{"/sw.js", "text/javascript", `"/static/calendar.css"`},
 		{"/sw.js", "text/javascript", `self.skipWaiting()`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
 		{"/static/appearance-init.js", "text/javascript", `localStorage.getItem("lifelog-color-mode")`},
@@ -489,6 +490,114 @@ func TestAuthenticatedBrowsePageFilteringAndValidation(t *testing.T) {
 	search := a.request(http.MethodGet, "/search?q=matching", nil)
 	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), `href="/day/2026-09-20"`) {
 		t.Fatalf("search regression: %d %s", search.Code, search.Body.String())
+	}
+}
+
+func TestCalendarMonthCalculationIsMondayFirst(t *testing.T) {
+	tests := []struct {
+		month       string
+		wantDays    int
+		wantLeading int
+	}{
+		{"2025-02", 28, 5},
+		{"2024-02", 29, 3},
+		{"2026-04", 30, 2},
+		{"2026-08", 31, 5},
+		{"2026-06", 30, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.month, func(t *testing.T) {
+			month, err := time.Parse("2006-01", tt.month)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cells := buildCalendarDays(month, time.Time{}, nil)
+			leading := 0
+			for _, cell := range cells {
+				if !cell.Blank {
+					break
+				}
+				leading++
+			}
+			real := 0
+			for _, cell := range cells {
+				if !cell.Blank {
+					real++
+				}
+			}
+			if real != tt.wantDays || leading != tt.wantLeading || len(cells)%7 != 0 {
+				t.Fatalf("real=%d leading=%d cells=%d", real, leading, len(cells))
+			}
+		})
+	}
+}
+
+func TestCalendarMonthNavigationAcrossYears(t *testing.T) {
+	params := url.Values{"question": {"12"}, "op": {"eq"}, "value": {"true"}}
+	january := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	december := time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+	if got := calendarMonthURL(january.AddDate(0, -1, 0), params); got != "/calendar?month=2025-12&op=eq&question=12&value=true" {
+		t.Fatalf("previous=%q", got)
+	}
+	if got := calendarMonthURL(december.AddDate(0, 1, 0), params); got != "/calendar?month=2027-01&op=eq&question=12&value=true" {
+		t.Fatalf("next=%q", got)
+	}
+	now := time.Date(2026, time.September, 22, 10, 0, 0, 0, time.UTC)
+	month, err := parseCalendarMonth("", now)
+	if err != nil || month.Format("2006-01-02") != "2026-09-01" {
+		t.Fatalf("current month=%v err=%v", month, err)
+	}
+}
+
+func TestAuthenticatedCalendarFilteringNavigationAndValidation(t *testing.T) {
+	a := newTestApp(t)
+	w := a.request(http.MethodGet, "/calendar", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("unauthenticated calendar: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+	p := a.create("Calendar", "", "UTC")
+	a.loginProfile(p.ID)
+	a.s.now = func() time.Time { return time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC) }
+	js, err := a.profiles.ListJournals(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := a.questions.CreateQuestion(t.Context(), js[0].ID, questions.CreateQuestionInput{Label: "Exercise", Type: questions.QuestionTypeBoolean})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-09-20", journal.SaveDayInput{Answers: []journal.AnswerInput{{QuestionID: q.ID, BoolValue: &yes}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-09-19", journal.SaveDayInput{}); err != nil {
+		t.Fatal(err)
+	}
+	query := "/calendar?month=2026-09&question=" + strconv.FormatInt(q.ID, 10) + "&op=eq&value=true"
+	w = a.request(http.MethodGet, query, nil)
+	body := w.Body.String()
+	for _, want := range []string{"September 2026", `href="/day/2026-09-20"`, `href="/day/2026-09-19"`, "matches-filter", `aria-current="date"`, "saved entry", "Matches filter", "month=2026-10", "month=2026-08"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("calendar missing %q: %s", want, body)
+		}
+	}
+	if !strings.Contains(body, "question%3D"+strconv.FormatInt(q.ID, 10)) && !strings.Contains(body, "question="+strconv.FormatInt(q.ID, 10)) {
+		t.Fatalf("navigation did not preserve filter: %s", body)
+	}
+	if !strings.Contains(body, `href="/day/2026-09-01"`) {
+		t.Fatal("unsaved dates are not openable")
+	}
+	w = a.request(http.MethodGet, "/calendar?month=bad", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "valid calendar month") {
+		t.Fatalf("invalid month response=%d %s", w.Code, w.Body.String())
+	}
+	w = a.request(http.MethodGet, "/calendar?month=2026-09&question=bad", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "valid question") {
+		t.Fatalf("invalid filter response=%d %s", w.Code, w.Body.String())
+	}
+	day := a.request(http.MethodGet, "/day/2026-09-22", nil)
+	if !strings.Contains(day.Body.String(), `href="/calendar"`) {
+		t.Fatal("calendar navigation missing from journal")
 	}
 }
 

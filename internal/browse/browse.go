@@ -68,6 +68,13 @@ type Result struct {
 	HasPrevious, HasNext bool
 }
 
+type MonthDay struct {
+	EntryDate        string
+	MatchesFilter    bool
+	HasPhotos        bool
+	HasSpecialMoment bool
+}
+
 type Store struct{ db *sql.DB }
 
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
@@ -154,25 +161,13 @@ func (s *Store) ListDays(ctx context.Context, journalID int64, f Filter) (Result
 		where = append(where, "d.entry_date <= ?")
 		args = append(args, f.To)
 	}
-	if f.QuestionID != 0 {
-		var kind questions.QuestionType
-		err := s.db.QueryRowContext(ctx, `SELECT type FROM questions WHERE id = ? AND journal_id = ? AND (is_active = 1 OR EXISTS (SELECT 1 FROM answers a JOIN days ad ON ad.id = a.day_id WHERE a.question_id = questions.id AND ad.journal_id = questions.journal_id))`, f.QuestionID, journalID).Scan(&kind)
-		if errors.Is(err, sql.ErrNoRows) {
-			return Result{}, fmt.Errorf("%w: question", ErrInvalidFilter)
-		}
-		if err != nil {
-			return Result{}, fmt.Errorf("read browse question: %w", err)
-		}
-		clause, clauseArgs, err := s.questionClause(ctx, journalID, kind, f)
-		if err != nil {
-			return Result{}, err
-		}
-		if clause != "" {
-			where = append(where, clause)
-			args = append(args, clauseArgs...)
-		}
-	} else if f.Operator != "" || f.Value != "" || f.OptionID != 0 {
-		return Result{}, fmt.Errorf("%w: question required", ErrInvalidFilter)
+	clause, clauseArgs, err := s.filterClause(ctx, journalID, f)
+	if err != nil {
+		return Result{}, err
+	}
+	if clause != "" {
+		where = append(where, clause)
+		args = append(args, clauseArgs...)
 	}
 	predicate := strings.Join(where, " AND ")
 	var total int
@@ -200,6 +195,67 @@ func (s *Store) ListDays(ctx context.Context, journalID int64, f Filter) (Result
 	}
 	result.HasNext = f.Page*PageSize < total
 	return result, nil
+}
+
+// ListMonthDays returns a compact projection for all saved days in one inclusive
+// month range. A question condition marks matching days without hiding other
+// saved days.
+func (s *Store) ListMonthDays(ctx context.Context, journalID int64, from, to string, f Filter) ([]MonthDay, bool, error) {
+	if err := validateDateRange(from, to); err != nil || from == "" || to == "" {
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, false, fmt.Errorf("%w: month range", ErrInvalidFilter)
+	}
+	clause, args, err := s.filterClause(ctx, journalID, f)
+	if err != nil {
+		return nil, false, err
+	}
+	active := clause != ""
+	matchSQL := "1"
+	if active {
+		matchSQL = clause
+	}
+	queryArgs := append([]any(nil), args...)
+	queryArgs = append(queryArgs, journalID, from, to)
+	rows, err := s.db.QueryContext(ctx, `SELECT d.entry_date, (`+matchSQL+`),
+		EXISTS(SELECT 1 FROM photos p WHERE p.day_id = d.id), trim(d.special_moment) <> ''
+		FROM days d WHERE d.journal_id = ? AND d.entry_date >= ? AND d.entry_date <= ?
+		ORDER BY d.entry_date`, queryArgs...)
+	if err != nil {
+		return nil, false, fmt.Errorf("list calendar month days: %w", err)
+	}
+	defer rows.Close()
+	var result []MonthDay
+	for rows.Next() {
+		var day MonthDay
+		if err := rows.Scan(&day.EntryDate, &day.MatchesFilter, &day.HasPhotos, &day.HasSpecialMoment); err != nil {
+			return nil, false, fmt.Errorf("scan calendar month day: %w", err)
+		}
+		result = append(result, day)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("list calendar month days: %w", err)
+	}
+	return result, active, nil
+}
+
+func (s *Store) filterClause(ctx context.Context, journalID int64, f Filter) (string, []any, error) {
+	if f.QuestionID == 0 {
+		if f.Operator != "" || f.Value != "" || f.OptionID != 0 {
+			return "", nil, fmt.Errorf("%w: question required", ErrInvalidFilter)
+		}
+		return "", nil, nil
+	}
+	var kind questions.QuestionType
+	err := s.db.QueryRowContext(ctx, `SELECT type FROM questions WHERE id = ? AND journal_id = ? AND (is_active = 1 OR EXISTS (SELECT 1 FROM answers a JOIN days ad ON ad.id = a.day_id WHERE a.question_id = questions.id AND ad.journal_id = questions.journal_id))`, f.QuestionID, journalID).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, fmt.Errorf("%w: question", ErrInvalidFilter)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("read browse question: %w", err)
+	}
+	return s.questionClause(ctx, journalID, kind, f)
 }
 
 func validateDateRange(from, to string) error {
