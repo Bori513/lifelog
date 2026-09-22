@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Bori513/lifelog/internal/backup"
+	browsepkg "github.com/Bori513/lifelog/internal/browse"
 	"github.com/Bori513/lifelog/internal/journal"
 	"github.com/Bori513/lifelog/internal/photos"
 	"github.com/Bori513/lifelog/internal/profiles"
@@ -43,6 +44,7 @@ type Server struct {
 	photos        *photos.Store
 	search        *search.Store
 	backups       *backup.Manager
+	browse        *browsepkg.Store
 	templates     *template.Template
 	secureCookies bool
 	now           func() time.Time
@@ -71,6 +73,21 @@ type PhotoView struct {
 type SearchResultView struct {
 	Date, DateLabel, Snippet string
 }
+type BrowseOptionView struct {
+	ID     int64
+	Label  string
+	Active bool
+}
+type BrowseQuestionView struct {
+	ID               int64
+	Label, Type      string
+	Active, Selected bool
+	Options          []BrowseOptionView
+}
+type BrowseDayView struct {
+	Date, DateLabel, GeneralNote, SpecialMoment, Location string
+	HasPhotos                                             bool
+}
 type ManageOptionView struct {
 	ID       int64
 	Label    string
@@ -86,22 +103,29 @@ type ManageQuestionView struct {
 	InactiveOptions  []ManageOptionView
 }
 type PageData struct {
-	Title, Error, CSRF, ProfileName                string
-	Profiles                                       []profiles.Profile
-	SelectedProfile                                profiles.Profile
-	ShowCreate                                     bool
-	Date, DateLabel, PreviousDate, NextDate, Today string
-	Saved                                          bool
-	GeneralNote, SpecialMoment, Location           string
-	Questions                                      []QuestionView
-	Photos                                         []PhotoView
-	ActiveQuestions, InactiveQuestions             []ManageQuestionView
-	QuestionTypes                                  []QuestionTypeView
-	Query                                          string
-	SearchResults                                  []SearchResultView
-	Searched                                       bool
-	ServerBackupConfigured                         bool
-	BackupMessage                                  string
+	Title, Error, CSRF, ProfileName                   string
+	Profiles                                          []profiles.Profile
+	SelectedProfile                                   profiles.Profile
+	ShowCreate                                        bool
+	Date, DateLabel, PreviousDate, NextDate, Today    string
+	Saved                                             bool
+	GeneralNote, SpecialMoment, Location              string
+	Questions                                         []QuestionView
+	Photos                                            []PhotoView
+	ActiveQuestions, InactiveQuestions                []ManageQuestionView
+	QuestionTypes                                     []QuestionTypeView
+	Query                                             string
+	SearchResults                                     []SearchResultView
+	Searched                                          bool
+	ServerBackupConfigured                            bool
+	BackupMessage                                     string
+	BrowseFrom, BrowseTo, BrowseOperator, BrowseValue string
+	BrowseQuestionID, BrowseOptionID                  int64
+	BrowseQuestions                                   []BrowseQuestionView
+	BrowseDays                                        []BrowseDayView
+	BrowseTotal                                       int
+	BrowseApplied                                     bool
+	PreviousPageURL, NextPageURL                      string
 }
 
 func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
@@ -122,7 +146,7 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	if err != nil {
 		return nil, fmt.Errorf("parse web templates: %w", err)
 	}
-	s := &Server{db: db, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), backups: backup.New(db, dataDir, backupDir), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
+	s := &Server{db: db, profiles: profiles.NewStore(db), questions: questions.NewStore(db), journal: journal.NewStore(db), photos: photos.NewStore(db, dataDir), search: search.NewStore(db), browse: browsepkg.NewStore(db), backups: backup.New(db, dataDir, backupDir), templates: t, secureCookies: secureCookies, now: time.Now, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /", s.root)
@@ -134,6 +158,7 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /today", s.today)
 	mux.HandleFunc("GET /search", s.getSearch)
+	mux.HandleFunc("GET /browse", s.getBrowse)
 	mux.HandleFunc("GET /day/{date}", s.getDay)
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
@@ -716,6 +741,105 @@ func (s *Server) getSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	d := PageData{Title: "Search journal", ProfileName: p.Name, Query: query, SearchResults: views, Searched: strings.TrimSpace(query) != ""}
 	s.render(w, "search.html", d)
+}
+func (s *Server) getBrowse(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requireProfile(w, r)
+	if !ok {
+		return
+	}
+	j, ok := s.defaultJournal(w, r, p)
+	if !ok {
+		return
+	}
+	available, err := s.browse.ListQuestions(r.Context(), j.ID)
+	if err != nil {
+		s.internal(w, "load browse questions", err)
+		return
+	}
+	filter, parseErr := parseBrowseFilter(r)
+	d := PageData{Title: "Browse journal", ProfileName: p.Name, BrowseFrom: filter.From, BrowseTo: filter.To, BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
+	for _, q := range available {
+		v := BrowseQuestionView{ID: q.ID, Label: q.Label, Type: string(q.Type), Active: q.Active, Selected: q.ID == filter.QuestionID}
+		for _, o := range q.Options {
+			v.Options = append(v.Options, BrowseOptionView{ID: o.ID, Label: o.Label, Active: o.Active})
+		}
+		d.BrowseQuestions = append(d.BrowseQuestions, v)
+	}
+	if parseErr != nil {
+		d.Error = parseErr.Error()
+		s.render(w, "browse.html", d)
+		return
+	}
+	result, err := s.browse.ListDays(r.Context(), j.ID, filter)
+	if errors.Is(err, browsepkg.ErrInvalidFilter) {
+		d.Error = "Please check the selected dates and question filter."
+		s.render(w, "browse.html", d)
+		return
+	}
+	if err != nil {
+		s.internal(w, "browse journal", err)
+		return
+	}
+	d.BrowseApplied = true
+	d.BrowseTotal = result.Total
+	for _, item := range result.Days {
+		parsed, err := time.Parse("2006-01-02", item.EntryDate)
+		if err != nil {
+			s.internal(w, "format browse date", err)
+			return
+		}
+		d.BrowseDays = append(d.BrowseDays, BrowseDayView{Date: item.EntryDate, DateLabel: parsed.Format("2 January 2006"), GeneralNote: browseSnippet(item.GeneralNote), SpecialMoment: browseSnippet(item.SpecialMoment), Location: browseSnippet(item.Location), HasPhotos: item.HasPhotos})
+	}
+	if result.HasPrevious {
+		d.PreviousPageURL = browsePageURL(r.URL.Query(), result.Page-1)
+	}
+	if result.HasNext {
+		d.NextPageURL = browsePageURL(r.URL.Query(), result.Page+1)
+	}
+	s.render(w, "browse.html", d)
+}
+
+func parseBrowseFilter(r *http.Request) (browsepkg.Filter, error) {
+	q := r.URL.Query()
+	f := browsepkg.Filter{From: q.Get("from"), To: q.Get("to"), Operator: browsepkg.Operator(q.Get("op")), Value: q.Get("value"), Page: 1}
+	var err error
+	if raw := q.Get("question"); raw != "" {
+		f.QuestionID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || f.QuestionID < 1 {
+			return f, errors.New("Please choose a valid question.")
+		}
+	}
+	if raw := q.Get("option"); raw != "" {
+		f.OptionID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || f.OptionID < 1 {
+			return f, errors.New("Please choose a valid option.")
+		}
+	}
+	if raw := q.Get("page"); raw != "" {
+		f.Page, err = strconv.Atoi(raw)
+		if err != nil || f.Page < 1 || f.Page > 1_000_000 {
+			return f, errors.New("Please choose a valid results page.")
+		}
+	}
+	return f, nil
+}
+
+func browsePageURL(values url.Values, page int) string {
+	copy := url.Values{}
+	for key, entries := range values {
+		copy[key] = append([]string(nil), entries...)
+	}
+	copy.Set("page", strconv.Itoa(page))
+	return "/browse?" + copy.Encode()
+}
+
+func browseSnippet(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	const max = 120
+	if len([]rune(value)) <= max {
+		return value
+	}
+	return string([]rune(value)[:max]) + "…"
 }
 func (s *Server) saveDay(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.requireProfile(w, r)

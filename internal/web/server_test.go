@@ -150,8 +150,9 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v5"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v6"`},
 		{"/sw.js", "text/javascript", `"/static/appearance-init.js"`},
+		{"/sw.js", "text/javascript", `"/static/browse.css"`},
 		{"/sw.js", "text/javascript", `self.skipWaiting()`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
 		{"/static/appearance-init.js", "text/javascript", `localStorage.getItem("lifelog-color-mode")`},
@@ -440,6 +441,54 @@ func TestAuthenticatedSearchPageAndEscaping(t *testing.T) {
 	w = b.request(http.MethodGet, "/search", nil)
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
 		t.Fatal("unauthenticated search was not protected")
+	}
+}
+
+func TestAuthenticatedBrowsePageFilteringAndValidation(t *testing.T) {
+	a := newTestApp(t)
+	w := a.request(http.MethodGet, "/browse", nil)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
+		t.Fatalf("unauthenticated browse: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+	p := a.create("Browser", "", "UTC")
+	a.loginProfile(p.ID)
+	js, err := a.profiles.ListJournals(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := a.questions.CreateQuestion(t.Context(), js[0].ID, questions.CreateQuestionInput{Label: "Exercise", Type: questions.QuestionTypeBoolean})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-09-20", journal.SaveDayInput{GeneralNote: "A matching day", Location: "Bratislava", Answers: []journal.AnswerInput{{QuestionID: q.ID, BoolValue: &yes}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-09-19", journal.SaveDayInput{GeneralNote: "Unanswered"}); err != nil {
+		t.Fatal(err)
+	}
+
+	w = a.request(http.MethodGet, "/browse", nil)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "Browse") || !strings.Contains(body, "2 days") || !strings.Contains(body, `href="/day/2026-09-20"`) || !strings.Contains(body, "A matching day") {
+		t.Fatalf("browse page code=%d body=%s", w.Code, body)
+	}
+	w = a.request(http.MethodGet, "/browse?question="+strconv.FormatInt(q.ID, 10)+"&op=eq&value=true", nil)
+	body = w.Body.String()
+	if !strings.Contains(body, "1 day") || !strings.Contains(body, `href="/day/2026-09-20"`) || strings.Contains(body, `href="/day/2026-09-19"`) {
+		t.Fatalf("filtered browse body=%s", body)
+	}
+	w = a.request(http.MethodGet, "/browse?from=not-a-date", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Please check the selected dates and question filter.") {
+		t.Fatalf("invalid date response=%d %s", w.Code, w.Body.String())
+	}
+	w = a.request(http.MethodGet, "/browse?question=bad", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Please choose a valid question.") {
+		t.Fatalf("invalid question response=%d %s", w.Code, w.Body.String())
+	}
+	search := a.request(http.MethodGet, "/search?q=matching", nil)
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), `href="/day/2026-09-20"`) {
+		t.Fatalf("search regression: %d %s", search.Code, search.Body.String())
 	}
 }
 

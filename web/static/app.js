@@ -59,6 +59,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll(`input[name="${button.dataset.clear}"]`).forEach(input => input.checked = false);
     button.closest("form")?.dispatchEvent(new Event("change", {bubbles: true}));
   }));
+  document.querySelector("[data-browse-question]")?.addEventListener("change", event => {
+    const browseForm = event.target.form;
+    for (const name of ["op", "value", "option", "page"]) {
+      browseForm?.querySelectorAll(`[name="${name}"]`).forEach(control => control.remove());
+    }
+    browseForm?.submit();
+  });
   const form = document.querySelector("[data-dirty-form]");
   if (!form) return;
   let dirty = false;
