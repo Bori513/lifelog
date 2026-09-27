@@ -92,7 +92,11 @@ type CalendarDayView struct {
 	Date, Day, Label                string
 	Blank, HasEntry, Matches, Today bool
 	HasPhotos, HasSpecialMoment     bool
+	Markers                         []CalendarMarkerView
+	MarkerOverflow                  int
+	MarkerLabel                     string
 }
+type CalendarMarkerView struct{ Marker, Label string }
 type ManageOptionView struct {
 	ID       int64
 	Label    string
@@ -102,6 +106,7 @@ type ManageOptionView struct {
 type ManageQuestionView struct {
 	ID               int64
 	Label, TypeLabel string
+	CalendarMarker   string
 	AllowsOptions    bool
 	MoveUp, MoveDown []int64
 	ActiveOptions    []ManageOptionView
@@ -109,6 +114,7 @@ type ManageQuestionView struct {
 }
 type PageData struct {
 	Title, Error, CSRF, ProfileName                   string
+	NavSection                                        string
 	Profiles                                          []profiles.Profile
 	SelectedProfile                                   profiles.Profile
 	ShowCreate                                        bool
@@ -116,6 +122,7 @@ type PageData struct {
 	Saved                                             bool
 	GeneralNote, SpecialMoment, Location              string
 	Questions                                         []QuestionView
+	JournalID                                         int64
 	Photos                                            []PhotoView
 	ActiveQuestions, InactiveQuestions                []ManageQuestionView
 	QuestionTypes                                     []QuestionTypeView
@@ -205,7 +212,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.render(w, "settings.html", PageData{Title: "Settings", ProfileName: p.Name})
+	s.render(w, "settings.html", PageData{Title: "Settings", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more"})
 }
 
 func (s *Server) getAppearance(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +220,7 @@ func (s *Server) getAppearance(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.render(w, "appearance.html", PageData{Title: "Appearance", ProfileName: p.Name})
+	s.render(w, "appearance.html", PageData{Title: "Appearance", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more"})
 }
 
 func (s *Server) getBackup(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +232,7 @@ func (s *Server) getBackup(w http.ResponseWriter, r *http.Request) {
 	if name := r.URL.Query().Get("created"); name != "" {
 		message = "Backup created on the server: " + filepath.Base(name)
 	}
-	s.render(w, "backup.html", PageData{Title: "Backup", ProfileName: p.Name, CSRF: s.csrfToken(w, r), ServerBackupConfigured: s.backups.ServerAvailable(), BackupMessage: message})
+	s.render(w, "backup.html", PageData{Title: "Backup", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more", ServerBackupConfigured: s.backups.ServerAvailable(), BackupMessage: message})
 }
 
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
@@ -315,6 +322,7 @@ func staticFile(name, contentType string) http.HandlerFunc {
 
 var questionTypes = []QuestionTypeView{
 	{string(questions.QuestionTypeShortText), "Short text"}, {string(questions.QuestionTypeLongText), "Long text"},
+	{string(questions.QuestionTypeWorkout), "Workout"},
 	{string(questions.QuestionTypeBoolean), "Yes / No"}, {string(questions.QuestionTypeNumber), "Number"},
 	{string(questions.QuestionTypeScale5), "Scale 1–5"}, {string(questions.QuestionTypeScale10), "Scale 1–10"},
 	{string(questions.QuestionTypeTime), "Time"}, {string(questions.QuestionTypeSelect), "Select"},
@@ -345,9 +353,9 @@ func (s *Server) renderQuestions(w http.ResponseWriter, r *http.Request, p profi
 			activeIDs = append(activeIDs, q.ID)
 		}
 	}
-	d := PageData{Title: "Questions", ProfileName: p.Name, CSRF: s.csrfToken(w, r), Error: message, QuestionTypes: questionTypes}
+	d := PageData{Title: "Questions", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more", Error: message, QuestionTypes: questionTypes}
 	for _, q := range all {
-		v := ManageQuestionView{ID: q.ID, Label: q.Label, TypeLabel: questionTypeLabel(q.Type), AllowsOptions: q.Type == questions.QuestionTypeSelect || q.Type == questions.QuestionTypeMultiSelect}
+		v := ManageQuestionView{ID: q.ID, Label: q.Label, TypeLabel: questionTypeLabel(q.Type), CalendarMarker: q.CalendarMarker, AllowsOptions: q.Type == questions.QuestionTypeSelect || q.Type == questions.QuestionTypeMultiSelect}
 		if q.IsActive {
 			v.MoveUp, v.MoveDown = movedIDs(activeIDs, q.ID, -1), movedIDs(activeIDs, q.ID, 1)
 		}
@@ -454,7 +462,7 @@ func formIDs(r *http.Request) ([]int64, error) {
 
 func (s *Server) createQuestion(w http.ResponseWriter, r *http.Request) {
 	s.questionPost(w, r, func(j profiles.Journal) error {
-		_, err := s.questions.CreateQuestion(r.Context(), j.ID, questions.CreateQuestionInput{Label: r.FormValue("label"), Type: questions.QuestionType(r.FormValue("type"))})
+		_, err := s.questions.CreateQuestion(r.Context(), j.ID, questions.CreateQuestionInput{Label: r.FormValue("label"), Type: questions.QuestionType(r.FormValue("type")), CalendarMarker: r.FormValue("calendar_marker")})
 		return err
 	})
 }
@@ -464,7 +472,7 @@ func (s *Server) renameQuestion(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		return s.questions.RenameQuestion(r.Context(), j.ID, id, questions.RenameQuestionInput{Label: r.FormValue("label")})
+		return s.questions.RenameQuestion(r.Context(), j.ID, id, questions.RenameQuestionInput{Label: r.FormValue("label"), CalendarMarker: r.FormValue("calendar_marker")})
 	})
 }
 func (s *Server) deactivateQuestion(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +571,8 @@ func questionError(err error) string {
 		return "Question or option cannot be empty."
 	case errors.Is(err, questions.ErrInvalidQuestionType):
 		return "Please choose a valid question type."
+	case errors.Is(err, questions.ErrInvalidCalendarMarker):
+		return "Calendar marker must be 16 characters or fewer."
 	case errors.Is(err, questions.ErrOptionsNotAllowed):
 		return "Options are only available for select and multiple choice questions."
 	case errors.Is(err, questions.ErrInvalidReorder):
@@ -751,7 +761,7 @@ func (s *Server) getSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		views = append(views, SearchResultView{Date: result.EntryDate, DateLabel: parsed.Format("2 January 2006"), Snippet: result.Snippet})
 	}
-	d := PageData{Title: "Search journal", ProfileName: p.Name, Query: query, SearchResults: views, Searched: strings.TrimSpace(query) != ""}
+	d := PageData{Title: "Search journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more", Query: query, SearchResults: views, Searched: strings.TrimSpace(query) != ""}
 	s.render(w, "search.html", d)
 }
 func (s *Server) getBrowse(w http.ResponseWriter, r *http.Request) {
@@ -769,7 +779,7 @@ func (s *Server) getBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter, parseErr := parseBrowseFilter(r)
-	d := PageData{Title: "Browse journal", ProfileName: p.Name, BrowseFrom: filter.From, BrowseTo: filter.To, BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
+	d := PageData{Title: "Browse journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "browse", BrowseFrom: filter.From, BrowseTo: filter.To, BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
 	setBrowseQuestions(&d, available, filter.QuestionID)
 	if parseErr != nil {
 		d.Error = parseErr.Error()
@@ -822,7 +832,7 @@ func (s *Server) getCalendar(w http.ResponseWriter, r *http.Request) {
 	today := s.now().In(loc)
 	month, monthErr := parseCalendarMonth(r.URL.Query().Get("month"), today)
 	filter, parseErr := parseQuestionFilter(r.URL.Query())
-	d := PageData{Title: "Calendar", ProfileName: p.Name, CalendarMonth: month.Format("2006-01"), CalendarMonthLabel: month.Format("January 2006"), FilterClearURL: "/calendar?month=" + month.Format("2006-01"), BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
+	d := PageData{Title: "Calendar", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "calendar", CalendarMonth: month.Format("2006-01"), CalendarMonthLabel: month.Format("January 2006"), FilterClearURL: "/calendar?month=" + month.Format("2006-01"), BrowseQuestionID: filter.QuestionID, BrowseOperator: string(filter.Operator), BrowseValue: filter.Value, BrowseOptionID: filter.OptionID}
 	available, err := s.browse.ListQuestions(r.Context(), j.ID)
 	if err != nil {
 		s.internal(w, "load calendar questions", err)
@@ -930,7 +940,19 @@ func buildCalendarDays(month, today time.Time, entries map[string]browsepkg.Mont
 		date := month.AddDate(0, 0, day-1)
 		key := date.Format("2006-01-02")
 		entry, exists := entries[key]
-		cells = append(cells, CalendarDayView{Date: key, Day: strconv.Itoa(day), Label: date.Format("Monday, 2 January 2006"), HasEntry: exists, Matches: exists && entry.MatchesFilter, Today: key == today.Format("2006-01-02"), HasPhotos: entry.HasPhotos, HasSpecialMoment: entry.HasSpecialMoment})
+		view := CalendarDayView{Date: key, Day: strconv.Itoa(day), Label: date.Format("Monday, 2 January 2006"), HasEntry: exists, Matches: exists && entry.MatchesFilter, Today: key == today.Format("2006-01-02"), HasPhotos: entry.HasPhotos, HasSpecialMoment: entry.HasSpecialMoment}
+		if exists {
+			labels := make([]string, 0, len(entry.Markers))
+			for i, marker := range entry.Markers {
+				labels = append(labels, marker.Label)
+				if i < 2 {
+					view.Markers = append(view.Markers, CalendarMarkerView{Marker: marker.Marker, Label: marker.Label})
+				}
+			}
+			view.MarkerOverflow = len(entry.Markers) - len(view.Markers)
+			view.MarkerLabel = strings.Join(labels, ", ")
+		}
+		cells = append(cells, view)
 	}
 	for len(cells)%7 != 0 {
 		cells = append(cells, CalendarDayView{Blank: true})
@@ -1168,7 +1190,7 @@ func (s *Server) renderDay(w http.ResponseWriter, r *http.Request, p profiles.Pr
 	}
 	loc, _ := time.LoadLocation(p.Timezone)
 	today := s.now().In(loc).Format("2006-01-02")
-	d := PageData{Title: "Daily journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), Date: date, DateLabel: parsed.Format("2 January 2006"), PreviousDate: parsed.AddDate(0, 0, -1).Format("2006-01-02"), NextDate: parsed.AddDate(0, 0, 1).Format("2006-01-02"), Today: today, Saved: r.URL.Query().Get("saved") == "1", Error: message, GeneralNote: day.GeneralNote, SpecialMoment: day.SpecialMoment, Location: day.Location, Questions: views, Photos: photoViews}
+	d := PageData{Title: "Daily journal", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "today", Date: date, DateLabel: parsed.Format("2 January 2006"), PreviousDate: parsed.AddDate(0, 0, -1).Format("2006-01-02"), NextDate: parsed.AddDate(0, 0, 1).Format("2006-01-02"), Today: today, Saved: r.URL.Query().Get("saved") == "1", Error: message, GeneralNote: day.GeneralNote, SpecialMoment: day.SpecialMoment, Location: day.Location, Questions: views, Photos: photoViews, JournalID: j.ID}
 	s.render(w, "day.html", d)
 }
 
@@ -1229,7 +1251,7 @@ func (s *Server) dayInput(r *http.Request, journalID int64) (journal.SaveDayInpu
 		a := journal.AnswerInput{QuestionID: q.ID}
 		raw := r.FormValue(prefix)
 		switch q.Type {
-		case questions.QuestionTypeShortText, questions.QuestionTypeLongText:
+		case questions.QuestionTypeShortText, questions.QuestionTypeLongText, questions.QuestionTypeWorkout:
 			a.TextValue = &raw
 		case questions.QuestionTypeBoolean:
 			if raw == "" {

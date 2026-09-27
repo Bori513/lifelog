@@ -1,0 +1,37 @@
+.mobile-nav,
+.mobile-more { display: none; }
+.mobile-more[hidden] { display: none; }
+
+@media (max-width: 700px) {
+  .shell { padding-bottom: calc(94px + env(safe-area-inset-bottom)); }
+  .topbar { display: none; }
+  .mobile-nav {
+    position: fixed; z-index: 30; right: 0; bottom: 0; left: 0;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid var(--border); background: var(--surface); box-shadow: 0 -4px 18px #0002;
+  }
+  .mobile-nav a,
+  .mobile-nav button {
+    display: grid; place-items: center; min-width: 0; min-height: 50px;
+    border: 0; border-radius: 10px; padding: 6px 2px; background: transparent;
+    color: var(--text-muted); font-size: .82rem; font-weight: 700; text-decoration: none; cursor: pointer;
+  }
+  .mobile-nav [aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+  .mobile-more {
+    position: fixed; z-index: 31; right: max(10px, env(safe-area-inset-right));
+    bottom: calc(68px + env(safe-area-inset-bottom)); display: grid;
+    width: min(260px, calc(100vw - 20px)); overflow: hidden;
+    border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 8px 28px #0003;
+  }
+  .mobile-more a,
+  .mobile-more button {
+    display: flex; align-items: center; width: 100%; min-height: 50px;
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+    padding: 10px 16px; background: transparent; color: var(--text);
+    text-align: left; text-decoration: none; cursor: pointer;
+  }
+  .mobile-more form:last-child button { border-bottom: 0; color: var(--danger); }
+  .save-bar { bottom: calc(62px + env(safe-area-inset-bottom)); padding-bottom: 12px; }
+  .day-shell { padding-bottom: calc(162px + env(safe-area-inset-bottom)); }
+}

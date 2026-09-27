@@ -3,18 +3,22 @@ package questions
 import "errors"
 
 var (
-	ErrNotFound            = errors.New("questions: not found")
-	ErrInvalidLabel        = errors.New("questions: label must not be blank")
-	ErrInvalidQuestionType = errors.New("questions: invalid question type")
-	ErrOptionsNotAllowed   = errors.New("questions: options are only allowed for select and multi-select questions")
-	ErrInvalidReorder      = errors.New("questions: reorder must contain every active item exactly once")
+	ErrNotFound              = errors.New("questions: not found")
+	ErrInvalidLabel          = errors.New("questions: label must not be blank")
+	ErrInvalidQuestionType   = errors.New("questions: invalid question type")
+	ErrInvalidCalendarMarker = errors.New("questions: calendar marker is too long")
+	ErrOptionsNotAllowed     = errors.New("questions: options are only allowed for select and multi-select questions")
+	ErrInvalidReorder        = errors.New("questions: reorder must contain every active item exactly once")
 )
+
+const MaxCalendarMarkerRunes = 16
 
 type QuestionType string
 
 const (
 	QuestionTypeShortText   QuestionType = "short_text"
 	QuestionTypeLongText    QuestionType = "long_text"
+	QuestionTypeWorkout     QuestionType = "workout"
 	QuestionTypeBoolean     QuestionType = "boolean"
 	QuestionTypeNumber      QuestionType = "number"
 	QuestionTypeScale5      QuestionType = "scale_5"
@@ -26,7 +30,7 @@ const (
 
 func (t QuestionType) valid() bool {
 	switch t {
-	case QuestionTypeShortText, QuestionTypeLongText, QuestionTypeBoolean,
+	case QuestionTypeShortText, QuestionTypeLongText, QuestionTypeWorkout, QuestionTypeBoolean,
 		QuestionTypeNumber, QuestionTypeScale5, QuestionTypeScale10,
 		QuestionTypeTime, QuestionTypeSelect, QuestionTypeMultiSelect:
 		return true
@@ -40,14 +44,15 @@ func (t QuestionType) allowsOptions() bool {
 }
 
 type Question struct {
-	ID        int64
-	JournalID int64
-	Label     string
-	Type      QuestionType
-	Position  int
-	IsActive  bool
-	CreatedAt string
-	UpdatedAt string
+	ID             int64
+	JournalID      int64
+	Label          string
+	CalendarMarker string
+	Type           QuestionType
+	Position       int
+	IsActive       bool
+	CreatedAt      string
+	UpdatedAt      string
 }
 
 type QuestionOption struct {
@@ -59,12 +64,14 @@ type QuestionOption struct {
 }
 
 type CreateQuestionInput struct {
-	Label string
-	Type  QuestionType
+	Label          string
+	Type           QuestionType
+	CalendarMarker string
 }
 
 type RenameQuestionInput struct {
-	Label string
+	Label          string
+	CalendarMarker string
 }
 
 type ReorderQuestionsInput struct {

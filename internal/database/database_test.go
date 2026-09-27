@@ -50,8 +50,12 @@ func TestOpenInitializesDatabase(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("count migrations after second run: %v", err)
 	}
-	if migrationsApplied != 2 {
-		t.Fatalf("migration count after second run = %d, want 2", migrationsApplied)
+	if migrationsApplied != 4 {
+		t.Fatalf("migration count after second run = %d, want 4", migrationsApplied)
+	}
+	var markerDefault string
+	if err := db.QueryRow(`SELECT calendar_marker FROM questions LIMIT 1`).Scan(&markerDefault); err != sql.ErrNoRows {
+		t.Fatalf("calendar_marker migration check error = %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO search_fts(rowid, body) VALUES (999, 'FTS5 works')`); err != nil {
 		t.Fatalf("insert FTS document: %v", err)

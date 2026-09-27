@@ -1,20 +1,12 @@
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-    pin_hash TEXT,
-    timezone TEXT NOT NULL DEFAULT 'UTC' CHECK (length(trim(timezone)) > 0),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
+CREATE TEMP TABLE questions_backup AS SELECT * FROM questions;
+CREATE TEMP TABLE question_options_backup AS SELECT * FROM question_options;
+CREATE TEMP TABLE answers_backup AS SELECT * FROM answers;
+CREATE TEMP TABLE answer_options_backup AS SELECT * FROM answer_options;
 
-CREATE TABLE journals (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX journals_user_id_idx ON journals(user_id);
+DROP TABLE answer_options;
+DROP TABLE answers;
+DROP TABLE question_options;
+DROP TABLE questions;
 
 CREATE TABLE questions (
     id INTEGER PRIMARY KEY,
@@ -40,18 +32,6 @@ CREATE TABLE question_options (
 );
 CREATE INDEX question_options_question_id_idx ON question_options(question_id);
 
-CREATE TABLE days (
-    id INTEGER PRIMARY KEY,
-    journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
-    entry_date TEXT NOT NULL,
-    general_note TEXT NOT NULL DEFAULT '',
-    special_moment TEXT NOT NULL DEFAULT '',
-    location TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (journal_id, entry_date)
-);
-
 CREATE TABLE answers (
     id INTEGER PRIMARY KEY,
     day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
@@ -75,22 +55,12 @@ CREATE TABLE answer_options (
 );
 CREATE INDEX answer_options_option_id_idx ON answer_options(option_id);
 
-CREATE TABLE photos (
-    id INTEGER PRIMARY KEY,
-    day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
-    relative_path TEXT NOT NULL CHECK (length(trim(relative_path)) > 0),
-    original_filename TEXT NOT NULL,
-    mime_type TEXT NOT NULL CHECK (length(trim(mime_type)) > 0),
-    file_size INTEGER NOT NULL CHECK (file_size >= 0),
-    created_at TEXT NOT NULL
-);
-CREATE INDEX photos_day_id_idx ON photos(day_id);
+INSERT INTO questions SELECT * FROM questions_backup;
+INSERT INTO question_options SELECT * FROM question_options_backup;
+INSERT INTO answers SELECT * FROM answers_backup;
+INSERT INTO answer_options SELECT * FROM answer_options_backup;
 
-CREATE TABLE sessions (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX sessions_user_id_idx ON sessions(user_id);
+DROP TABLE questions_backup;
+DROP TABLE question_options_backup;
+DROP TABLE answers_backup;
+DROP TABLE answer_options_backup;

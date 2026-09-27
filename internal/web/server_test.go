@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
@@ -150,10 +151,15 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v7"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v12"`},
+		{"/sw.js", "text/javascript", `"/static/navigation.css"`},
+		{"/static/navigation.css", "text/css", `.mobile-nav`},
+		{"/static/navigation.css", "text/css", `.mobile-more[hidden]`},
+		{"/sw.js", "text/javascript", `"/static/day.css"`},
 		{"/sw.js", "text/javascript", `"/static/appearance-init.js"`},
 		{"/sw.js", "text/javascript", `"/static/browse.css"`},
 		{"/sw.js", "text/javascript", `"/static/calendar.css"`},
+		{"/sw.js", "text/javascript", `"/static/calendar-markers.css"`},
 		{"/sw.js", "text/javascript", `self.skipWaiting()`},
 		{"/offline.html", "text/html", "Connect to your LifeLog server"},
 		{"/static/appearance-init.js", "text/javascript", `localStorage.getItem("lifelog-color-mode")`},
@@ -183,6 +189,33 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 	w = a.request(http.MethodGet, "/day/2026-08-29", nil)
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
 		t.Fatalf("PWA assets changed authentication: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+}
+
+func TestAuthenticatedMobileNavigation(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Navigator", "", "UTC")
+	a.loginProfile(p.ID)
+
+	tests := []struct {
+		path, active string
+	}{
+		{"/day/2026-09-27", `href="/today" aria-current="page"`},
+		{"/browse", `href="/browse" aria-current="page"`},
+		{"/calendar?month=2026-09", `href="/calendar" aria-current="page"`},
+		{"/search", `aria-controls="mobile-more-menu" aria-current="page"`},
+		{"/questions", `aria-controls="mobile-more-menu" aria-current="page"`},
+		{"/settings", `aria-controls="mobile-more-menu" aria-current="page"`},
+	}
+	for _, tt := range tests {
+		w := a.request(http.MethodGet, tt.path, nil)
+		body := w.Body.String()
+		if w.Code != http.StatusOK || !strings.Contains(body, `aria-label="Primary navigation"`) || !strings.Contains(body, tt.active) {
+			t.Errorf("GET %s missing active mobile navigation: code=%d", tt.path, w.Code)
+		}
+		if !strings.Contains(body, `method="post" action="/logout"`) || !strings.Contains(body, `name="csrf_token" value="`) {
+			t.Errorf("GET %s missing protected sign-out form", tt.path)
+		}
 	}
 }
 
@@ -294,7 +327,7 @@ func TestSettingsAndAppearanceRoutes(t *testing.T) {
 			t.Errorf("appearance page missing accessible %s theme control", theme)
 		}
 	}
-	if strings.Contains(body, "<form") || strings.Contains(body, "csrf_token") {
+	if strings.Contains(body, `action="/settings/appearance"`) {
 		t.Fatal("appearance page introduced server-side preference persistence")
 	}
 }
@@ -598,6 +631,36 @@ func TestAuthenticatedCalendarFilteringNavigationAndValidation(t *testing.T) {
 	day := a.request(http.MethodGet, "/day/2026-09-22", nil)
 	if !strings.Contains(day.Body.String(), `href="/calendar"`) {
 		t.Fatal("calendar navigation missing from journal")
+	}
+}
+
+func TestCalendarRendersTwoEscapedMarkersWithAccessibleOverflow(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Markers", "", "UTC")
+	a.loginProfile(p.ID)
+	js, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	markers := []string{"<b>X</b>", "⛳", "🍺"}
+	var answers []journal.AnswerInput
+	value := true
+	for i, marker := range markers {
+		q, err := a.questions.CreateQuestion(t.Context(), js[0].ID, questions.CreateQuestionInput{Label: fmt.Sprintf("Marker %d", i+1), Type: questions.QuestionTypeBoolean, CalendarMarker: marker})
+		if err != nil {
+			t.Fatal(err)
+		}
+		answers = append(answers, journal.AnswerInput{QuestionID: q.ID, BoolValue: &value})
+	}
+	if _, err := a.journal.SaveDay(t.Context(), js[0].ID, "2026-09-20", journal.SaveDayInput{Answers: answers}); err != nil {
+		t.Fatal(err)
+	}
+	w := a.request(http.MethodGet, "/calendar?month=2026-09", nil)
+	body := w.Body.String()
+	for _, want := range []string{"&lt;b&gt;X&lt;/b&gt;", "⛳", "+1", "question markers: Marker 1, Marker 2, Marker 3"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("calendar missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<b>X</b>") || strings.Contains(body, "🍺</span>") {
+		t.Fatalf("calendar rendered unsafe or third visible marker: %s", body)
 	}
 }
 
@@ -1100,5 +1163,40 @@ func TestQuestionOptionManagementAndIsolation(t *testing.T) {
 	privateOpts, _ := a.questions.ListOptions(t.Context(), jb[0].ID, questionB.ID, true)
 	if private[0].Label != "Private" || !private[0].IsActive || privateOpts[0].ID != optionB.ID || privateOpts[0].Label != "Secret" {
 		t.Fatal("cross-user operation changed private configuration")
+	}
+}
+
+func TestWorkoutDayControlsAndRawSave(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Lifter", "", "UTC")
+	js, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	q, err := a.questions.CreateQuestion(t.Context(), js[0].ID, questions.CreateQuestionInput{Label: "Workout", Type: questions.QuestionTypeWorkout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.loginProfile(p.ID)
+	token, w := a.getToken("/day/2026-09-27")
+	body := w.Body.String()
+	for _, want := range []string{`data-workout-input`, `data-workout-preview`, `data-focus-editor`, `data-pin-question`, `data-pinned-question-list`, `data-focus-dialog`, `aria-pressed="false"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("day missing %q: %s", want, body)
+		}
+	}
+	if strings.Index(body, `data-pinned-question-list`) > strings.Index(body, `name="general_note"`) {
+		t.Fatalf("pinned question slot is not above built-in daily fields: %s", body)
+	}
+	if strings.Contains(body, "onclick=") || strings.Contains(body, "<script>") {
+		t.Fatalf("day introduced inline script or handler: %s", body)
+	}
+	raw := "Bench 10x60, nope, 6x80"
+	prefix := "q_" + strconv.FormatInt(q.ID, 10)
+	form := url.Values{"csrf_token": {token}, prefix + "_present": {"1"}, prefix: {raw}}
+	w = a.request(http.MethodPost, "/day/2026-09-27", form)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("save code=%d body=%s", w.Code, w.Body.String())
+	}
+	day, err := a.journal.GetDay(t.Context(), js[0].ID, "2026-09-27")
+	if err != nil || len(day.Answers) != 1 || day.Answers[0].TextValue == nil || *day.Answers[0].TextValue != raw {
+		t.Fatalf("saved day=%+v err=%v", day, err)
 	}
 }

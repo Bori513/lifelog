@@ -282,7 +282,7 @@ func validateAnswer(ctx context.Context, tx *sql.Tx, q questionState, a AnswerIn
 		scalarCount++
 	}
 	switch q.kind {
-	case questions.QuestionTypeShortText, questions.QuestionTypeLongText:
+	case questions.QuestionTypeShortText, questions.QuestionTypeLongText, questions.QuestionTypeWorkout:
 		if a.TextValue == nil || scalarCount != 1 || len(a.OptionIDs) != 0 {
 			return ErrWrongAnswerType
 		}
@@ -352,7 +352,7 @@ func isClear(kind questions.QuestionType, a AnswerInput) bool {
 	if a.Clear {
 		return true
 	}
-	if (kind == questions.QuestionTypeShortText || kind == questions.QuestionTypeLongText) && a.TextValue != nil && *a.TextValue == "" {
+	if (kind == questions.QuestionTypeShortText || kind == questions.QuestionTypeLongText || kind == questions.QuestionTypeWorkout) && a.TextValue != nil && *a.TextValue == "" {
 		return true
 	}
 	return (kind == questions.QuestionTypeSelect || kind == questions.QuestionTypeMultiSelect) && len(a.OptionIDs) == 0

@@ -117,6 +117,51 @@ func TestBooleanKeepsUnansweredDistinctFromNo(t *testing.T) {
 	}
 }
 
+func TestCalendarMarkersUseTypeSemanticsOrderAndHistory(t *testing.T) {
+	f := newFixture(t)
+	boolQ := f.question("Boolean", questions.QuestionTypeBoolean)
+	textQ := f.question("Text", questions.QuestionTypeShortText)
+	workoutQ := f.question("Workout", questions.QuestionTypeWorkout)
+	numberQ := f.question("Number", questions.QuestionTypeNumber)
+	scaleQ := f.question("Scale", questions.QuestionTypeScale5)
+	timeQ := f.question("Time", questions.QuestionTypeTime)
+	selectQ := f.question("Select", questions.QuestionTypeSelect)
+	multiQ := f.question("Multi", questions.QuestionTypeMultiSelect)
+	selected := f.option(selectQ.ID, "One")
+	multiSelected := f.option(multiQ.ID, "One")
+	for _, q := range []questions.Question{boolQ, textQ, workoutQ, numberQ, scaleQ, timeQ, selectQ, multiQ} {
+		if err := f.questions.RenameQuestion(t.Context(), f.journalID, q.ID, questions.RenameQuestionInput{Label: q.Label, CalendarMarker: "⭐"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.save("2026-06-01",
+		journal.AnswerInput{QuestionID: boolQ.ID, BoolValue: boolean(true)},
+		journal.AnswerInput{QuestionID: textQ.ID, TextValue: text("filled")},
+		journal.AnswerInput{QuestionID: workoutQ.ID, TextValue: text("Squat 3x5")},
+		journal.AnswerInput{QuestionID: numberQ.ID, NumberValue: number(0)},
+		journal.AnswerInput{QuestionID: scaleQ.ID, NumberValue: number(3)},
+		journal.AnswerInput{QuestionID: timeQ.ID, TimeValue: text("08:00")},
+		journal.AnswerInput{QuestionID: selectQ.ID, OptionIDs: []int64{selected.ID}},
+		journal.AnswerInput{QuestionID: multiQ.ID, OptionIDs: []int64{multiSelected.ID}},
+	)
+	f.save("2026-06-02", journal.AnswerInput{QuestionID: boolQ.ID, BoolValue: boolean(false)})
+	if err := f.questions.DeactivateQuestion(t.Context(), f.journalID, textQ.ID); err != nil {
+		t.Fatal(err)
+	}
+	days, _, err := f.browse.ListMonthDays(t.Context(), f.journalID, "2026-06-01", "2026-06-30", Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 2 || len(days[0].Markers) != 8 || len(days[1].Markers) != 0 {
+		t.Fatalf("calendar markers=%+v", days)
+	}
+	for i, marker := range days[0].Markers {
+		if marker.Marker != "⭐" || marker.QuestionID != []int64{boolQ.ID, textQ.ID, workoutQ.ID, numberQ.ID, scaleQ.ID, timeQ.ID, selectQ.ID, multiQ.ID}[i] {
+			t.Fatalf("marker %d=%+v", i, marker)
+		}
+	}
+}
+
 func TestSelectAndMultiSelectUseHistoricalOptionIdentity(t *testing.T) {
 	f := newFixture(t)
 	selectQ := f.question("Mood", questions.QuestionTypeSelect)
@@ -320,4 +365,23 @@ func newProfileJournal(t *testing.T, f *fixture) int64 {
 		t.Fatal(err)
 	}
 	return js[0].ID
+}
+
+func TestWorkoutTextFilters(t *testing.T) {
+	f := newFixture(t)
+	q := f.question("Workout", questions.QuestionTypeWorkout)
+	bench, pushups := "Bench 10x60", "Push ups 20"
+	f.save("2026-09-25", journal.AnswerInput{QuestionID: q.ID, TextValue: &bench})
+	f.save("2026-09-26", journal.AnswerInput{QuestionID: q.ID, TextValue: &pushups})
+	f.save("2026-09-27")
+	for _, tt := range []struct {
+		op    Operator
+		value string
+		want  string
+	}{{OperatorContains, "bench", "2026-09-25,"}, {OperatorFilled, "", "2026-09-26,2026-09-25,"}, {OperatorEmpty, "", "2026-09-27,"}} {
+		got, err := f.browse.ListDays(t.Context(), f.journalID, Filter{QuestionID: q.ID, Operator: tt.op, Value: tt.value})
+		if err != nil || dates(got) != tt.want {
+			t.Fatalf("op=%q dates=%q err=%v", tt.op, dates(got), err)
+		}
+	}
 }

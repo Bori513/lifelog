@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Bori513/lifelog/internal/database"
@@ -62,6 +63,40 @@ func TestQuestionCreationValidationAndIsolation(t *testing.T) {
 	}
 	if got := questionIDs(questions); !reflect.DeepEqual(got, []int64{first.ID, second.ID}) {
 		t.Fatalf("journal 1 IDs = %v", got)
+	}
+}
+
+func TestCalendarMarkerCreateEditRemoveAndValidate(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	marked, err := store.CreateQuestion(ctx, 1, CreateQuestionInput{Label: "Workout", Type: QuestionTypeWorkout, CalendarMarker: "  🏋️  "})
+	if err != nil || marked.CalendarMarker != "🏋️" {
+		t.Fatalf("created marker=%q err=%v", marked.CalendarMarker, err)
+	}
+	unmarked, err := store.CreateQuestion(ctx, 1, CreateQuestionInput{Label: "Notes", Type: QuestionTypeShortText})
+	if err != nil || unmarked.CalendarMarker != "" {
+		t.Fatalf("unmarked=%q err=%v", unmarked.CalendarMarker, err)
+	}
+	if err := store.RenameQuestion(ctx, 1, marked.ID, RenameQuestionInput{Label: "Workout", CalendarMarker: "✅"}); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := store.ListQuestions(ctx, 1, true)
+	if all[0].CalendarMarker != "✅" {
+		t.Fatalf("edited marker=%q", all[0].CalendarMarker)
+	}
+	if err := store.RenameQuestion(ctx, 1, marked.ID, RenameQuestionInput{Label: "Workout", CalendarMarker: "  "}); err != nil {
+		t.Fatal(err)
+	}
+	all, _ = store.ListQuestions(ctx, 1, true)
+	if all[0].CalendarMarker != "" {
+		t.Fatalf("removed marker=%q", all[0].CalendarMarker)
+	}
+	tooLong := strings.Repeat("x", MaxCalendarMarkerRunes+1)
+	if _, err := store.CreateQuestion(ctx, 1, CreateQuestionInput{Label: "Bad", Type: QuestionTypeShortText, CalendarMarker: tooLong}); !errors.Is(err, ErrInvalidCalendarMarker) {
+		t.Fatalf("long create error=%v", err)
+	}
+	if err := store.RenameQuestion(ctx, 1, marked.ID, RenameQuestionInput{Label: "Workout", CalendarMarker: tooLong}); !errors.Is(err, ErrInvalidCalendarMarker) {
+		t.Fatalf("long edit error=%v", err)
 	}
 }
 
@@ -308,5 +343,13 @@ func assertOptionOrder(t *testing.T, store *Store, journalID, questionID int64, 
 	}
 	if got := optionIDs(items); !reflect.DeepEqual(got, want) {
 		t.Fatalf("option order = %v, want %v", got, want)
+	}
+}
+
+func TestWorkoutIsAValidQuestionType(t *testing.T) {
+	store, _ := newTestStore(t)
+	question, err := store.CreateQuestion(t.Context(), 1, CreateQuestionInput{Label: "Workout", Type: QuestionTypeWorkout})
+	if err != nil || question.Type != QuestionTypeWorkout {
+		t.Fatalf("CreateQuestion() question=%+v err=%v", question, err)
 	}
 }

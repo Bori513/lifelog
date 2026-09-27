@@ -80,6 +80,12 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   represent the user's local calendar day rather than the server's UTC date.
 - **Build mobile-first and provide PWA capabilities.** Daily use is phone-centered;
   installation and standalone display are useful without requiring offline sync.
+- **Use section-level mobile navigation.** At widths up to 700px, authenticated
+  pages use a fixed bottom navigation for Today, Browse, Calendar, and More while
+  desktop retains the existing top navigation. Every dated day, including a
+  historical date, belongs to the Today section; Search, Questions, and all
+  Settings pages belong to More. This keeps the active state predictable without
+  adding routes or client-side date logic.
 - **Do not implement offline journal sync in the MVP.** Synchronization would add
   substantial state and conflict complexity to an otherwise server-owned journal.
 - **Keep the PWA service worker limited to static presentation assets.** It uses a
@@ -118,5 +124,17 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   but the schema can support more without a migration of historical entries.
 - **Treat presets as question templates, not subsystems.** Applying a preset simply
   creates ordinary questions that the user can then customize.
+- **Keep workout entries raw-text-first.** Workout questions store their exact
+  input in `answers.text_value`; the compact parser produces derived data, and
+  malformed notation produces a preview warning but never blocks a day Save.
+  Historical long-text migration and workout progress calculations are deferred.
+- **Keep question pins browser-local.** Pins are stored in `localStorage`, scoped
+  by journal ID, and reorder only existing daily form cards. Database question
+  positions remain unchanged.
+- **Keep Calendar question markers generic and configuration-driven.** Questions
+  may have one optional short marker. Fixed type-based answered semantics decide
+  when it appears, independently of Calendar filters. The Calendar shows at most
+  two markers in question order plus a `+N` overflow count; current question
+  configuration also controls historical display. No picker or icon library is used.
 - **Do not include AI in the MVP.** Conventional SQLite FTS meets initial search
   needs without privacy, resource, or product complexity.

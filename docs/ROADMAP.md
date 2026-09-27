@@ -27,6 +27,9 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [x] Browser-local light/dark appearance modes and eight visual themes
 - [x] Day overview with date range and one-question filtering
 - [x] Calendar overview
+- [x] Generic per-question Calendar markers
+- [x] Workout quick entry, focus editor, and browser-local question pinning
+- [x] Compact mobile bottom navigation with an accessible More menu
 - [ ] Multiple journals per user in the interface
 - [ ] Voice notes
 - [ ] General attachments

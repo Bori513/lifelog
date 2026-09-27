@@ -1,0 +1,8 @@
+.field-help{display:block;margin-top:4px;font-size:.78rem;font-weight:400}
+.question-details-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,.45fr) auto;align-items:end;gap:8px}
+.question-details-form .outline-button{margin-bottom:1px}
+.calendar-cell-bottom{display:grid;gap:2px;min-width:0}
+.question-markers{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0;overflow:hidden;white-space:nowrap;font-size:.78rem;line-height:1}
+.question-markers span{min-width:0;overflow:hidden}
+.question-markers b{flex:none;color:var(--text-muted);font-size:.58rem}
+@media(max-width:600px){.question-details-form{grid-template-columns:1fr}.question-details-form .outline-button{width:100%}}

@@ -73,6 +73,13 @@ type MonthDay struct {
 	MatchesFilter    bool
 	HasPhotos        bool
 	HasSpecialMoment bool
+	Markers          []CalendarMarker
+}
+
+type CalendarMarker struct {
+	QuestionID int64
+	Marker     string
+	Label      string
 }
 
 type Store struct{ db *sql.DB }
@@ -237,6 +244,46 @@ func (s *Store) ListMonthDays(ctx context.Context, journalID int64, from, to str
 	if err := rows.Err(); err != nil {
 		return nil, false, fmt.Errorf("list calendar month days: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, false, fmt.Errorf("close calendar month days: %w", err)
+	}
+	byDate := make(map[string]*MonthDay, len(result))
+	for i := range result {
+		byDate[result[i].EntryDate] = &result[i]
+	}
+	markerRows, err := s.db.QueryContext(ctx, `SELECT d.entry_date, q.id, q.calendar_marker, q.label
+		FROM days d
+		JOIN answers a ON a.day_id = d.id
+		JOIN questions q ON q.id = a.question_id
+		WHERE d.journal_id = ? AND d.entry_date >= ? AND d.entry_date <= ?
+		AND trim(q.calendar_marker) <> ''
+		AND CASE q.type
+			WHEN 'boolean' THEN a.bool_value = 1
+			WHEN 'short_text' THEN a.text_value IS NOT NULL AND trim(a.text_value) <> ''
+			WHEN 'long_text' THEN a.text_value IS NOT NULL AND trim(a.text_value) <> ''
+			WHEN 'workout' THEN a.text_value IS NOT NULL AND trim(a.text_value) <> ''
+			WHEN 'multi_select' THEN EXISTS (SELECT 1 FROM answer_options ao WHERE ao.answer_id = a.id)
+			WHEN 'select' THEN EXISTS (SELECT 1 FROM answer_options ao WHERE ao.answer_id = a.id)
+			ELSE 1
+		END
+		ORDER BY d.entry_date, q.position, q.id`, journalID, from, to)
+	if err != nil {
+		return nil, false, fmt.Errorf("list calendar markers: %w", err)
+	}
+	defer markerRows.Close()
+	for markerRows.Next() {
+		var date string
+		var marker CalendarMarker
+		if err := markerRows.Scan(&date, &marker.QuestionID, &marker.Marker, &marker.Label); err != nil {
+			return nil, false, fmt.Errorf("scan calendar marker: %w", err)
+		}
+		if day := byDate[date]; day != nil {
+			day.Markers = append(day.Markers, marker)
+		}
+	}
+	if err := markerRows.Err(); err != nil {
+		return nil, false, fmt.Errorf("list calendar markers: %w", err)
+	}
 	return result, active, nil
 }
 
@@ -317,7 +364,7 @@ func (s *Store) questionClause(ctx context.Context, journalID int64, kind questi
 			return "", nil, fmt.Errorf("%w: time", ErrInvalidFilter)
 		}
 		return answer + `a.time_value ` + op + ` ?)`, []any{f.QuestionID, f.Value}, nil
-	case questions.QuestionTypeShortText, questions.QuestionTypeLongText:
+	case questions.QuestionTypeShortText, questions.QuestionTypeLongText, questions.QuestionTypeWorkout:
 		switch f.Operator {
 		case "":
 			return "", nil, nil

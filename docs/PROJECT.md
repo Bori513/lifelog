@@ -42,9 +42,13 @@ SQLite transaction. Users can move to the previous day, next day, today, or a
 date selected with a date picker.
 
 Journal questions are data, not application features. Users can create, rename,
-reorder, deactivate, and reactivate questions. Initial types are short text, long
-text, yes/no, number, scales from 1–5 and 1–10, time, select, and multi-select.
+reorder, deactivate, and reactivate questions. Types include short text, long
+text, workout, yes/no, number, scales from 1–5 and 1–10, time, select, and
+multi-select.
 Historical answers must remain understandable when questions or options change.
+Questions may optionally define a short Calendar marker. Fixed semantics by answer
+type determine whether it appears on a saved day; markers remain independent of
+Calendar question filters.
 
 ## MVP scope
 

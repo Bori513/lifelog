@@ -24,6 +24,10 @@ func (s *Store) CreateQuestion(ctx context.Context, journalID int64, input Creat
 	if !input.Type.valid() {
 		return Question{}, fmt.Errorf("%w: %q", ErrInvalidQuestionType, input.Type)
 	}
+	marker, err := validCalendarMarker(input.CalendarMarker)
+	if err != nil {
+		return Question{}, err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -37,11 +41,11 @@ func (s *Store) CreateQuestion(ctx context.Context, journalID int64, input Creat
 		return Question{}, fmt.Errorf("find question position: %w", err)
 	}
 	row := tx.QueryRowContext(ctx, `
-		INSERT INTO questions (journal_id, label, type, position, is_active, created_at, updated_at)
-		SELECT id, ?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		INSERT INTO questions (journal_id, label, type, calendar_marker, position, is_active, created_at, updated_at)
+		SELECT id, ?, ?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		FROM journals WHERE id = ?
-		RETURNING id, journal_id, label, type, position, is_active, created_at, updated_at`,
-		label, input.Type, position, journalID)
+		RETURNING id, journal_id, label, type, calendar_marker, position, is_active, created_at, updated_at`,
+		label, input.Type, marker, position, journalID)
 	question, err := scanQuestion(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -56,7 +60,7 @@ func (s *Store) CreateQuestion(ctx context.Context, journalID int64, input Creat
 }
 
 func (s *Store) ListQuestions(ctx context.Context, journalID int64, includeInactive bool) ([]Question, error) {
-	query := `SELECT id, journal_id, label, type, position, is_active, created_at, updated_at FROM questions WHERE journal_id = ?`
+	query := `SELECT id, journal_id, label, type, calendar_marker, position, is_active, created_at, updated_at FROM questions WHERE journal_id = ?`
 	if !includeInactive {
 		query += ` AND is_active = 1`
 	}
@@ -86,7 +90,11 @@ func (s *Store) RenameQuestion(ctx context.Context, journalID, questionID int64,
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE questions SET label = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND journal_id = ?`, label, questionID, journalID)
+	marker, err := validCalendarMarker(input.CalendarMarker)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE questions SET label = ?, calendar_marker = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND journal_id = ?`, label, marker, questionID, journalID)
 	if err != nil {
 		return fmt.Errorf("rename question: %w", err)
 	}
@@ -313,8 +321,16 @@ type scanner interface {
 
 func scanQuestion(row scanner) (Question, error) {
 	var question Question
-	err := row.Scan(&question.ID, &question.JournalID, &question.Label, &question.Type, &question.Position, &question.IsActive, &question.CreatedAt, &question.UpdatedAt)
+	err := row.Scan(&question.ID, &question.JournalID, &question.Label, &question.Type, &question.CalendarMarker, &question.Position, &question.IsActive, &question.CreatedAt, &question.UpdatedAt)
 	return question, err
+}
+
+func validCalendarMarker(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) > MaxCalendarMarkerRunes {
+		return "", ErrInvalidCalendarMarker
+	}
+	return value, nil
 }
 
 func validLabel(value string) (string, error) {

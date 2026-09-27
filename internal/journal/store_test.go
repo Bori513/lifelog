@@ -237,3 +237,14 @@ func optionSnapshots(day Day, questionID int64) map[int64]string {
 	}
 	return result
 }
+
+func TestWorkoutUsesExactRawTextStorage(t *testing.T) {
+	store, db := newTestStore(t)
+	questionID := addQuestion(t, db, 1, "Workout", questions.QuestionTypeWorkout, true)
+	raw := "Bench press 10x60, hello, 6x80\n  Pull ups: 10 + 5"
+	day, err := store.SaveDay(t.Context(), 1, "2026-09-27", SaveDayInput{Answers: []AnswerInput{{QuestionID: questionID, TextValue: &raw}}})
+	answer := answerFor(day, questionID)
+	if err != nil || answer.TextValue == nil || *answer.TextValue != raw || answer.QuestionLabelSnapshot != "Workout" {
+		t.Fatalf("SaveDay() day=%+v err=%v", day, err)
+	}
+}

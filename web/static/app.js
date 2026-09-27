@@ -66,8 +66,144 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     browseForm?.submit();
   });
+  const moreButton = document.querySelector("[data-mobile-more]");
+  const moreMenu = document.querySelector("[data-mobile-more-menu]");
+  const closeMore = (restoreFocus = false) => {
+    if (!moreButton || !moreMenu || moreMenu.hidden) return;
+    moreMenu.hidden = true;
+    moreButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) moreButton.focus();
+  };
+  moreButton?.addEventListener("click", () => {
+    if (!moreMenu) return;
+    const opening = moreMenu.hidden;
+    moreMenu.hidden = !opening;
+    moreButton.setAttribute("aria-expanded", String(opening));
+    if (opening) moreMenu.querySelector("a, button")?.focus();
+  });
+  moreMenu?.addEventListener("click", event => {
+    if (event.target.closest("a")) closeMore();
+  });
+  document.addEventListener("click", event => {
+    if (!moreMenu?.hidden && !moreMenu.contains(event.target) && !moreButton?.contains(event.target)) closeMore();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !moreMenu?.hidden) closeMore(true);
+  });
   const form = document.querySelector("[data-dirty-form]");
   if (!form) return;
+
+  const parseWorkoutLine = line => {
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] !== " " && line[i] !== "\t") continue;
+      const name = line.slice(0, i).trim().replace(/:$/, "").trim();
+      const setText = line.slice(i).trim();
+      const first = setText.split(",", 1)[0].trim();
+      if (name && /^(\d+)\s*(?:([xX+\-])\s*(\d+(?:\.\d+)?))?$/.test(first)) return {name, setText};
+    }
+    return null;
+  };
+  const parseWorkout = raw => {
+    const exercises = [], warnings = [];
+    raw.split("\n").forEach(line => {
+      if (!line.trim()) return;
+      const split = parseWorkoutLine(line);
+      if (!split) { warnings.push(line); return; }
+      const sets = [];
+      split.setText.split(",").forEach(value => {
+        const token = value.trim();
+        const match = token.match(/^(\d+)\s*(?:([xX+\-])\s*(\d+(?:\.\d+)?))?$/);
+        if (!match) { warnings.push(line); return; }
+        const type = !match[2] ? "bodyweight" : match[2].toLowerCase() === "x" ? "external" : match[2] === "+" ? "added" : "assisted";
+        sets.push({reps: Number(match[1]), type, weight: match[3] ? Number(match[3]) : 0});
+      });
+      if (sets.length) exercises.push({name: split.name, sets});
+    });
+    return {exercises, warnings: [...new Set(warnings)]};
+  };
+  const formatWeight = value => Number.isInteger(value) ? String(value) : String(value);
+  const renderWorkout = input => {
+    const target = input.closest("[data-editor]")?.querySelector("[data-workout-preview]");
+    if (!target) return;
+    target.replaceChildren();
+    const parsed = parseWorkout(input.value);
+    parsed.exercises.forEach(exercise => {
+      const row = document.createElement("p");
+      const title = document.createElement("strong"); title.textContent = exercise.name;
+      const external = exercise.sets.filter(set => set.type === "external").map(set => set.weight);
+      const added = exercise.sets.filter(set => set.type === "added").map(set => set.weight);
+      const assisted = exercise.sets.filter(set => set.type === "assisted").map(set => set.weight);
+      let detail = `${exercise.sets.length} ${exercise.sets.length === 1 ? "set" : "sets"}`;
+      if (external.length) detail += ` · top load ${formatWeight(Math.max(...external))} kg`;
+      else if (added.length) detail += ` · max added weight +${formatWeight(Math.max(...added))} kg`;
+      else if (assisted.length) detail += ` · lowest assistance ${formatWeight(Math.min(...assisted))} kg`;
+      else detail += ` · ${exercise.sets.reduce((sum, set) => sum + set.reps, 0)} total reps`;
+      row.append(title, document.createTextNode(detail)); target.append(row);
+    });
+    if (parsed.warnings.length) {
+      const warning = document.createElement("p"); warning.className = "workout-warning";
+      warning.textContent = `Could not understand: ${parsed.warnings.join(" · ")}`; target.append(warning);
+    }
+  };
+  document.querySelectorAll("[data-workout-input]").forEach(input => {
+    renderWorkout(input);
+    input.addEventListener("input", () => renderWorkout(input));
+  });
+
+  const questionList = document.querySelector("[data-question-list]");
+  const pinnedQuestionList = document.querySelector("[data-pinned-question-list]");
+  const pinKey = "lifelog-pinned-questions";
+  const scope = questionList?.dataset.pinScope;
+  let pinState = {};
+  try {
+    const stored = JSON.parse(localStorage.getItem(pinKey) || "{}");
+    if (stored && typeof stored === "object" && !Array.isArray(stored)) pinState = stored;
+  } catch (_) {}
+  let pinned = new Set(Array.isArray(pinState[scope]) ? pinState[scope].filter(id => typeof id === "string" && /^\d+$/.test(id)) : []);
+  const configuredCards = questionList ? Array.from(questionList.querySelectorAll("[data-question-card]")) : [];
+  const orderQuestions = () => {
+    if (!questionList || !pinnedQuestionList) return;
+    configuredCards.filter(card => pinned.has(card.dataset.questionId)).forEach(card => pinnedQuestionList.append(card));
+    configuredCards.filter(card => !pinned.has(card.dataset.questionId)).forEach(card => questionList.append(card));
+    configuredCards.forEach(card => {
+      const button = card.querySelector("[data-pin-question]");
+      const selected = pinned.has(card.dataset.questionId);
+      button?.setAttribute("aria-pressed", String(selected));
+      if (button) button.textContent = selected ? "Unpin" : "Pin";
+    });
+  };
+  orderQuestions();
+  questionList?.querySelectorAll("[data-pin-question]").forEach(button => button.addEventListener("click", () => {
+    const id = button.closest("[data-question-card]")?.dataset.questionId;
+    if (!id) return;
+    if (pinned.has(id)) pinned.delete(id); else pinned.add(id);
+    pinState[scope] = Array.from(pinned);
+    try { localStorage.setItem(pinKey, JSON.stringify(pinState)); } catch (_) {}
+    orderQuestions();
+  }));
+
+  const focusDialog = document.querySelector("[data-focus-dialog]");
+  const focusBody = focusDialog?.querySelector("[data-focus-body]");
+  const focusTitle = focusDialog?.querySelector("[data-focus-title]");
+  let focusedEditor = null, editorPlaceholder = null, focusButton = null;
+  const closeFocus = () => {
+    if (!focusedEditor || !editorPlaceholder) return;
+    editorPlaceholder.replaceWith(focusedEditor);
+    focusedEditor = null; editorPlaceholder = null;
+    focusDialog?.close(); document.body.classList.remove("focus-editor-open"); focusButton?.focus();
+  };
+  document.querySelectorAll("[data-focus-editor]").forEach(button => button.addEventListener("click", () => {
+    const card = button.closest("[data-question-card]");
+    const editor = card?.querySelector("[data-editor]");
+    if (!focusDialog || !focusBody || !editor) return;
+    focusButton = button; focusedEditor = editor; editorPlaceholder = document.createComment("editor position");
+    editor.replaceWith(editorPlaceholder); focusBody.append(editor);
+    if (focusTitle) focusTitle.textContent = card.querySelector(".question-heading > label")?.textContent || "Focus editor";
+    focusDialog.showModal(); document.body.classList.add("focus-editor-open"); editor.querySelector("textarea")?.focus();
+  }));
+  focusDialog?.querySelector("[data-focus-close]")?.addEventListener("click", closeFocus);
+  focusDialog?.addEventListener("cancel", event => { event.preventDefault(); closeFocus(); });
+
   let dirty = false;
   const label = document.querySelector(".dirty-label");
   const mark = () => { dirty = true; if (label) label.textContent = "Unsaved changes"; };

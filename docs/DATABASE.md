@@ -52,16 +52,19 @@ Creating a profile atomically creates its initial journal named `Personal`.
 | `journal_id` | Foreign key to `journals.id` |
 | `label` | Current question label |
 | `type` | Supported answer type |
+| `calendar_marker` | Optional short marker shown for qualifying answers in Calendar |
 | `position` | Display order within the journal |
 | `is_active` | Whether shown for new/current entries |
 | `created_at` | Creation timestamp |
 | `updated_at` | Last update timestamp |
 
-Supported initial types are short text, long text, yes/no, number, scale 1–5,
+Supported types are short text, long text, workout, yes/no, number, scale 1–5,
 scale 1–10, time, select, and multi-select. Once answers exist, the question type
 must not change in place. The old question is deactivated and a new one created.
 Question positions are zero-based. Active questions are shown by position and ID;
 reactivating a question appends it to the end of the active question list.
+Calendar markers use current question configuration rather than answer snapshots;
+changing or clearing one immediately changes historical Calendar display.
 
 ### `question_options`
 
@@ -117,6 +120,10 @@ only the typed value column relevant to the question is populated. Select and
 multi-select values use `answer_options` rather than these scalar columns. Exact
 database checks for value/type consistency should be settled with the migrations;
 application validation is required in all cases.
+
+Workout answers reuse `text_value`; their exact raw notation is authoritative.
+Parsed exercises and sets are derived data and are not persisted in separate
+tables.
 
 The daily Save input distinguishes an omitted question from an explicitly cleared
 question. Clearing deletes the answer row (and cascades to its selected options)
