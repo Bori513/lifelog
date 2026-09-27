@@ -151,7 +151,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v14"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v15"`},
 		{"/sw.js", "text/javascript", `"/static/navigation.css"`},
 		{"/static/navigation.css", "text/css", `.mobile-nav`},
 		{"/static/navigation.css", "text/css", `.mobile-more[hidden]`},
@@ -1234,6 +1234,33 @@ func TestWorkoutDraftTemplateVisibilityAndFocusLayoutAssets(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Fatalf("day.css missing Focus template layout %q", want)
 		}
+	}
+}
+
+func TestQuestionPinRefreshUsesStableDelegatedHandler(t *testing.T) {
+	a := newTestApp(t)
+	js := a.request(http.MethodGet, "/static/app.js", nil).Body.String()
+
+	orderCall := strings.Index(js, "  orderQuestions();")
+	delegatedHandler := strings.Index(js, `form.addEventListener("click", event => {`)
+	if orderCall < 0 || delegatedHandler < 0 || delegatedHandler < orderCall {
+		t.Fatalf("question pins must bind through the stable form after initial reordering")
+	}
+	for _, want := range []string{
+		`const button = event.target.closest?.("[data-pin-question]")`,
+		`const id = button.closest("[data-question-card]")?.dataset.questionId`,
+		`if (pinned.has(id)) pinned.delete(id); else pinned.add(id)`,
+		`pinState[scope] = Array.from(pinned)`,
+		`localStorage.setItem(pinKey, JSON.stringify(pinState))`,
+		`configuredCards.filter(card => pinned.has(card.dataset.questionId)).forEach(card => pinnedQuestionList.append(card))`,
+		`configuredCards.filter(card => !pinned.has(card.dataset.questionId)).forEach(card => questionList.append(card))`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js missing refresh-safe pin behavior %q", want)
+		}
+	}
+	if strings.Contains(js, `questionList?.querySelectorAll("[data-pin-question]").forEach`) {
+		t.Fatal("pin handlers are still attached only to cards left in the unpinned list")
 	}
 }
 

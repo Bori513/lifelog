@@ -214,14 +214,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
   orderQuestions();
-  questionList?.querySelectorAll("[data-pin-question]").forEach(button => button.addEventListener("click", () => {
+  form.addEventListener("click", event => {
+    const button = event.target.closest?.("[data-pin-question]");
+    if (!button || !form.contains(button)) return;
     const id = button.closest("[data-question-card]")?.dataset.questionId;
     if (!id) return;
     if (pinned.has(id)) pinned.delete(id); else pinned.add(id);
     pinState[scope] = Array.from(pinned);
     try { localStorage.setItem(pinKey, JSON.stringify(pinState)); } catch (_) {}
     orderQuestions();
-  }));
+  });
 
   const focusDialog = document.querySelector("[data-focus-dialog]");
   const focusBody = focusDialog?.querySelector("[data-focus-body]");
