@@ -1,37 +1,53 @@
 # LifeLog
 
-LifeLog is a minimalist, self-hosted personal journal. It is designed to keep a
-person's journal on hardware they control while remaining easy to understand,
-back up, move, and run on modest devices.
+LifeLog is a simple, self-hosted daily journal built around questions you define
+yourself.
 
-> LifeLog is in early development. Back up your data and expect changes before a
-> stable release.
+> LifeLog is an early project under active development. Back up your data and
+> expect changes before a stable release.
 
-## Priorities
+## Why I built it
 
-LifeLog makes trade-offs in this order:
+LifeLog started as a personal project. I often forget ordinary details from my
+days: what I did, where I went, whether I worked out, or small moments I would
+like to remember later.
 
-1. Simplicity
-2. Reliability
-3. Speed
-4. Features
+I wanted a private place where I could spend a minute or two answering questions
+I chose myself, gradually building a searchable history on my own server instead
+of depending on a hosted journaling service.
 
-The project is mobile-first, open source, multi-user capable, and friendly to a
-single-user installation. It avoids unnecessary services and frontend tooling.
+## Features
 
-## Stack
+- A daily journal with a general note, memorable moment, location, and photos.
+- Custom, reorderable questions: short text, long text, Workout, yes/no, number,
+  1–5 and 1–10 scales, time, select, and multi-select.
+- Workout questions with compact raw-text gym notation, a live preview, and a
+  focused editor. Questions can also be pinned to the top of the daily form in
+  the current browser.
+- Question and option deactivation that preserves understandable historical
+  answers when the journal configuration changes.
+- Full-text search across journal text and answers.
+- Browse / Day Overview with date ranges and type-aware question filters.
+- A monthly Calendar that reuses the question filters and can show optional
+  markers configured per question.
+- Multiple local profiles, with optional PIN or password protection. The current
+  interface provides one journal per profile.
+- Mobile-first responsive interface with bottom navigation and installable PWA
+  behavior. Journal data remains online-only and is not cached for offline
+  editing.
+- System, light, and dark appearance modes with eight browser-local themes.
+- Whole-instance ZIP backup downloads, optional server-side backup storage, and
+  a documented offline restore workflow.
 
-- Go monolith
-- SQLite through `modernc.org/sqlite`
-- Server-rendered HTML with `html/template`
-- Vanilla JavaScript and simple CSS
-- Progressive Web App support
-- Photos on the filesystem, with metadata in SQLite
-- Docker deployment for Linux AMD64 and ARM64
+## Philosophy and design
 
-## Docker quick start
+LifeLog makes trade-offs in this order: **simplicity > reliability > speed >
+features**. It deliberately uses a small stack and avoids services that are not
+needed for a dependable personal journal.
 
-Clone the repository and start the one-container deployment:
+## Quick start
+
+Docker and Docker Compose are the intended deployment path:
 
 ```bash
 git clone https://github.com/Bori513/lifelog.git
@@ -39,101 +55,105 @@ cd lifelog
 docker compose up -d
 ```
 
-Open `http://SERVER_IP:8080`. The first page guides you through creating the
-first local profile. Follow logs with `docker compose logs -f` and stop the
-service with `docker compose down`.
+Open `http://SERVER_IP:8080` and create the first local profile. View logs with
+`docker compose logs -f` and stop LifeLog with `docker compose down`.
 
-Compose bind-mounts `./data` at `/data`; do not remove that directory. The image
-runs as root inside the container so a newly created bind mount is writable on a
-wide range of Docker hosts without UID/GID setup. The container has no privileged
-mode, host filesystem mount, or bundled sidecar service.
+Compose stores persistent state in `./data` on the host, mounted at `/data` in
+the container. Keep this directory when recreating or updating the container.
 
-The default Compose setting uses `LIFELOG_SECURE_COOKIES=false` for plain local
-HTTP. When LifeLog is served through trusted HTTPS, set it to `true` and recreate
-the container. Docker does not provide HTTPS. Tailscale Serve, Caddy, nginx, or
-another trusted reverse proxy can provide HTTPS without becoming a LifeLog
-dependency. A host already connected to Tailscale can also expose port 8080 over
-that private network; no Tailscale software runs in this stack.
+The default Compose configuration uses plain HTTP and sets secure cookies off.
+For access beyond a trusted local or private network, put LifeLog behind HTTPS
+and set `LIFELOG_SECURE_COOKIES=true`. Docker does not provide HTTPS; a reverse
+proxy or an HTTPS-capable Tailscale setup can provide it.
 
-LifeLog works as a normal web app over LAN or Tailscale HTTP. Service workers and
-PWA installation generally require HTTPS on a real phone; `localhost` is the
-browser development exception. Do not expect full PWA installation from an
-arbitrary plain-HTTP IP address.
+## Updating
 
-The unauthenticated `GET /healthz` endpoint returns only database availability and
-no journal data.
+Create a backup first, then update the checkout and rebuild the container:
 
-## Data, backups, and moving hosts
-
-The persistent state is `data/journal.db` (including SQLite WAL/SHM sidecars while
-running) and `data/photos/`. An authenticated user can open **Backup** from the
-journal and create a full-instance ZIP download. LifeLog creates the archived
-`journal.db` with SQLite `VACUUM INTO`, so it is a standalone consistent snapshot;
-the live WAL and SHM files are deliberately not archived. The ZIP also contains
-the complete `photos/` tree and a minimal `backup-info.json` manifest.
-
-Server-side backups are optional. Set `LIFELOG_BACKUP_DIR=/backup` and explicitly
-bind-mount a host directory at `/backup`, for example:
-
-```yaml
-services:
-  lifelog:
-    volumes:
-      - ./data:/data
-      - /path/on/host/lifelog-backups:/backup
-    environment:
-      LIFELOG_BACKUP_DIR: /backup
+```bash
+git pull --ff-only
+docker compose up -d --build
 ```
 
-LifeLog will not create a missing configured backup directory. This prevents a
-missing external mount from being mistaken for durable backup storage. Existing
-deployments need no configuration change: browser downloads work when the setting
-is empty, while the server-backup action remains unavailable. For protection from
-disk failure, place server backups on a different physical disk or device from
-the primary data. Completed ZIP files are ordinary standalone artifacts suitable
-for copying or later rsync to another machine.
+The persistent `./data` directory is not replaced by this process. Check startup
+afterward with `docker compose logs` or `http://SERVER_IP:8080/healthz`.
 
-### Manual restore
+## Backup and restore
 
-There is intentionally no web restore action.
+Open **Settings → Backup** to create and download a ZIP of the entire LifeLog
+instance. It contains a standalone SQLite snapshot, the complete `photos/` tree,
+and a small backup manifest. The backup covers every local profile.
 
-1. Stop LifeLog. Never restore into a running instance.
-2. Move or copy the current persistent data directory somewhere safe.
-3. Extract the backup ZIP and open its `lifelog-backup/` directory.
-4. Put the archived `journal.db` and `photos/` directory in LifeLog's persistent
-   data directory (normally the host directory mounted at `/data`).
-5. Ensure the files are readable and writable by the container/application.
-6. Start LifeLog and verify that `GET /healthz` returns `ok`.
-7. Sign in and verify journal entries and photos.
+To restore, stop LifeLog, preserve the current `data/` directory somewhere safe,
+and extract the backup. Copy `lifelog-backup/journal.db` and its `photos/`
+directory into the persistent data directory, then start LifeLog and verify your
+entries and photos. Never restore into a running instance.
 
-The archived database is standalone. Archived WAL or SHM files are not needed and
-are not present. For a stopped, simple filesystem backup instead, copy the complete
-data directory; copying only live `journal.db` in WAL mode is unsafe.
+LifeLog can also write backups to a server directory when
+`LIFELOG_BACKUP_DIR` is configured and that directory is mounted into the
+container. For protection against disk failure, store those backups on a
+different device from the primary data.
 
-To move between AMD64 and ARM64 machines, stop LifeLog, copy the complete `data/`
-directory, and start LifeLog on the destination. SQLite needs no architecture
-conversion.
+## Architecture
 
-## MVP direction
+LifeLog is one Go application running as one process and normally deployed as a
+single container with persistent data. It uses SQLite, server-rendered
+`html/template` pages, vanilla JavaScript and CSS, filesystem-backed photos, and
+a small PWA layer. The image builds for Linux AMD64 and ARM64.
 
-The MVP will provide local profiles, configurable journal questions, an editable
-daily entry saved atomically in one operation, optional photos, SQLite full-text
-search, and a mobile-first PWA experience. Offline synchronization and AI are
-not part of the MVP.
+There is no Node frontend runtime or build pipeline, and no PostgreSQL, Redis,
+background worker, or companion service.
 
-Project scope and design are documented in [`docs/PROJECT.md`](docs/PROJECT.md),
-[`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/DECISIONS.md`](docs/DECISIONS.md),
-and [`docs/DATABASE.md`](docs/DATABASE.md).
+## Configuration
 
-## PWA access
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LIFELOG_DATA_DIR` | `./data` (`/data` in Docker) | SQLite database and photo storage |
+| `LIFELOG_ADDR` | `:8080` | HTTP listen address |
+| `LIFELOG_SECURE_COOKIES` | `false` | Enable the `Secure` flag on session and CSRF cookies; use with HTTPS |
+| `LIFELOG_BACKUP_DIR` | empty | Existing directory for optional server-side backups |
 
-LifeLog can be installed from a supported browser and launched in standalone
-mode. The installation layer caches only static presentation assets; journal
-pages, photos, and writes always require a connection to the LifeLog server.
+The included `compose.yaml` maps host port `8080`, mounts `./data:/data`, and
+uses `LIFELOG_BACKUP_DIR` from the host environment when set.
 
-Browsers treat `localhost` as a secure context for development. A phone may open
-LifeLog from a LAN address such as `http://192.168.x.x:8080`, but service-worker
-and installation behavior is generally restricted on that insecure origin. A
-real phone installation should use HTTPS, provided in a future deployment by an
-HTTPS-capable Tailscale setup or reverse proxy. LifeLog does not terminate TLS or
-configure Tailscale itself.
+## PWA and mobile access
+
+LifeLog works as a normal web app over a LAN or private network. Installation as
+a PWA and service-worker support generally require HTTPS on a phone; `localhost`
+is the browser development exception. The service worker caches presentation
+assets and an offline page only. Entries, photos, and writes always require a
+connection to the LifeLog server.
+
+## Data and privacy
+
+Journal records and photo metadata live in `data/journal.db`; uploaded photos
+live under `data/photos/`. Photos are served through authenticated application
+routes rather than exposing the directory directly. LifeLog has no hosted
+account requirement: the person operating the server controls where the
+application and its data run.
+
+Optional PINs and passwords are stored as bcrypt hashes, but self-hosting does
+not replace normal server, network, access-control, and backup security. Journal
+contents are not encrypted at rest by the application.
+
+## Project status
+
+LifeLog was originally built for personal use and is still an early project.
+Most planned MVP functionality is implemented; real-world testing and reliability
+polish are ongoing. Feedback from other self-hosters is welcome, but the project
+should not yet be treated as production-certified or professionally audited.
+
+Project scope and decisions are documented in
+[`docs/PROJECT.md`](docs/PROJECT.md), [`docs/ROADMAP.md`](docs/ROADMAP.md),
+[`docs/DECISIONS.md`](docs/DECISIONS.md), and
+[`docs/DATABASE.md`](docs/DATABASE.md).
+
+## Feedback and contributing
+
+Bug reports, UX feedback, feature ideas, and pull requests are welcome through
+[GitHub Issues](https://github.com/Bori513/lifelog/issues). Please keep proposals
+consistent with the project's minimalist scope and priorities.
+
+## License
+
+LifeLog is licensed under the MIT License. See [LICENSE](LICENSE).
