@@ -50,8 +50,8 @@ func TestOpenInitializesDatabase(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("count migrations after second run: %v", err)
 	}
-	if migrationsApplied != 4 {
-		t.Fatalf("migration count after second run = %d, want 4", migrationsApplied)
+	if migrationsApplied != 5 {
+		t.Fatalf("migration count after second run = %d, want 5", migrationsApplied)
 	}
 	var markerDefault string
 	if err := db.QueryRow(`SELECT calendar_marker FROM questions LIMIT 1`).Scan(&markerDefault); err != sql.ErrNoRows {

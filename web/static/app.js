@@ -66,6 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     browseForm?.submit();
   });
+  document.querySelector("[data-workout-exercise-select]")?.addEventListener("change", event => event.target.form?.submit());
   const moreButton = document.querySelector("[data-mobile-more]");
   const moreMenu = document.querySelector("[data-mobile-more-menu]");
   const closeMore = (restoreFocus = false) => {
@@ -121,6 +122,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     return {exercises, warnings: [...new Set(warnings)]};
   };
+  // Draft detection is intentionally more permissive than parseWorkout. It is
+  // used only to hide quick-insert chips while a matching exercise line exists.
+  const draftExerciseNames = (raw, templateNames) => {
+    const normalize = value => value.trim().toLocaleLowerCase();
+    const templates = templateNames.map(name => ({name, key: normalize(name)})).filter(item => item.key);
+    const present = new Set();
+    raw.split("\n").forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const parsed = parseWorkoutLine(line);
+      if (parsed) {
+        present.add(normalize(parsed.name));
+        return;
+      }
+      const normalizedLine = normalize(line);
+      const candidates = templates.filter(item => {
+        if (normalizedLine === item.key) return true;
+        if (normalizedLine.startsWith(item.key + ":")) return true;
+        if (!normalizedLine.startsWith(item.key)) return false;
+        const suffix = normalizedLine.slice(item.key.length);
+        return /^\s+\d/.test(suffix);
+      });
+      candidates.sort((left, right) => right.key.length - left.key.length);
+      if (candidates.length) present.add(candidates[0].key);
+    });
+    return present;
+  };
   const formatWeight = value => Number.isInteger(value) ? String(value) : String(value);
   const renderWorkout = input => {
     const target = input.closest("[data-editor]")?.querySelector("[data-workout-preview]");
@@ -146,8 +174,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
   document.querySelectorAll("[data-workout-input]").forEach(input => {
-    renderWorkout(input);
-    input.addEventListener("input", () => renderWorkout(input));
+    const editor = input.closest("[data-editor]");
+    const chips = Array.from(editor?.querySelectorAll("[data-exercise-template]") || []);
+    const updateTemplates = () => {
+      const present = draftExerciseNames(input.value, chips.map(chip => chip.dataset.exerciseTemplate));
+      chips.forEach(chip => chip.hidden = present.has(chip.dataset.exerciseTemplate.trim().toLocaleLowerCase()));
+    };
+    const update = () => { renderWorkout(input); updateTemplates(); };
+    chips.forEach(chip => chip.addEventListener("click", () => {
+      const separator = input.value && !input.value.endsWith("\n") ? "\n" : "";
+      input.value += separator + chip.dataset.exerciseTemplate + " ";
+      input.dispatchEvent(new Event("input", {bubbles: true}));
+      input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    }));
+    update();
+    input.addEventListener("input", update);
   });
 
   const questionList = document.querySelector("[data-question-list]");

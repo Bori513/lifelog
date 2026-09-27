@@ -64,6 +64,7 @@ type QuestionView struct {
 	BoolValue          *bool
 	Options            []OptionView
 	Scale              []int
+	ExerciseTemplates  []questions.ExerciseTemplate
 }
 type QuestionTypeView struct{ Value, Label string }
 type PhotoView struct {
@@ -104,13 +105,30 @@ type ManageOptionView struct {
 	MoveDown []int64
 }
 type ManageQuestionView struct {
-	ID               int64
-	Label, TypeLabel string
-	CalendarMarker   string
-	AllowsOptions    bool
-	MoveUp, MoveDown []int64
-	ActiveOptions    []ManageOptionView
-	InactiveOptions  []ManageOptionView
+	ID                int64
+	Label, TypeLabel  string
+	CalendarMarker    string
+	AllowsOptions     bool
+	MoveUp, MoveDown  []int64
+	ActiveOptions     []ManageOptionView
+	InactiveOptions   []ManageOptionView
+	AllowsTemplates   bool
+	ExerciseTemplates []ManageOptionView
+}
+type WorkoutBestView struct{ Label, Value string }
+type WorkoutEntryView struct{ Date, DateLabel, Sets string }
+type WorkoutExerciseView struct {
+	Name, Key string
+	Selected  bool
+}
+type WorkoutHistoryView struct {
+	QuestionID                                          int64
+	QuestionLabel, View, SelectedExercise, PeriodLabel  string
+	Exercises                                           []WorkoutExerciseView
+	Bests, PreviousBests                                []WorkoutBestView
+	Entries                                             []WorkoutEntryView
+	Sessions                                            int
+	HistoryURL, MonthURL, YearURL, PreviousURL, NextURL string
 }
 type PageData struct {
 	Title, Error, CSRF, ProfileName                   string
@@ -144,6 +162,7 @@ type PageData struct {
 	CalendarTodayURL                                  string
 	CalendarFilterActive                              bool
 	CalendarDays                                      []CalendarDayView
+	WorkoutHistory                                    WorkoutHistoryView
 }
 
 func New(db *sql.DB, dataDir string, secureCookies bool, logger *log.Logger) (*Server, error) {
@@ -182,6 +201,7 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.HandleFunc("POST /day/{date}", s.saveDay)
 	mux.HandleFunc("GET /photos/{id}", s.getPhoto)
 	mux.HandleFunc("GET /questions", s.getQuestions)
+	mux.HandleFunc("GET /workout/questions/{id}", s.getWorkoutHistory)
 	mux.HandleFunc("GET /settings", s.getSettings)
 	mux.HandleFunc("GET /settings/appearance", s.getAppearance)
 	mux.HandleFunc("GET /settings/backup", s.getBackup)
@@ -199,6 +219,10 @@ func NewConfigured(db *sql.DB, dataDir, backupDir string, secureCookies bool, lo
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/rename", s.renameOption)
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/deactivate", s.deactivateOption)
 	mux.HandleFunc("POST /questions/{id}/options/{optionID}/reactivate", s.reactivateOption)
+	mux.HandleFunc("POST /questions/{id}/exercise-templates", s.createExerciseTemplate)
+	mux.HandleFunc("POST /questions/{id}/exercise-templates/reorder", s.reorderExerciseTemplates)
+	mux.HandleFunc("POST /questions/{id}/exercise-templates/{templateID}/rename", s.renameExerciseTemplate)
+	mux.HandleFunc("POST /questions/{id}/exercise-templates/{templateID}/delete", s.deleteExerciseTemplate)
 	mux.HandleFunc("GET /manifest.webmanifest", staticFile("static/manifest.webmanifest", "application/manifest+json; charset=utf-8"))
 	mux.HandleFunc("GET /sw.js", staticFile("static/sw.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /offline.html", staticFile("static/offline.html", "text/html; charset=utf-8"))
@@ -355,7 +379,7 @@ func (s *Server) renderQuestions(w http.ResponseWriter, r *http.Request, p profi
 	}
 	d := PageData{Title: "Questions", ProfileName: p.Name, CSRF: s.csrfToken(w, r), NavSection: "more", Error: message, QuestionTypes: questionTypes}
 	for _, q := range all {
-		v := ManageQuestionView{ID: q.ID, Label: q.Label, TypeLabel: questionTypeLabel(q.Type), CalendarMarker: q.CalendarMarker, AllowsOptions: q.Type == questions.QuestionTypeSelect || q.Type == questions.QuestionTypeMultiSelect}
+		v := ManageQuestionView{ID: q.ID, Label: q.Label, TypeLabel: questionTypeLabel(q.Type), CalendarMarker: q.CalendarMarker, AllowsOptions: q.Type == questions.QuestionTypeSelect || q.Type == questions.QuestionTypeMultiSelect, AllowsTemplates: q.Type == questions.QuestionTypeWorkout}
 		if q.IsActive {
 			v.MoveUp, v.MoveDown = movedIDs(activeIDs, q.ID, -1), movedIDs(activeIDs, q.ID, 1)
 		}
@@ -379,6 +403,20 @@ func (s *Server) renderQuestions(w http.ResponseWriter, r *http.Request, p profi
 				} else {
 					v.InactiveOptions = append(v.InactiveOptions, ov)
 				}
+			}
+		}
+		if v.AllowsTemplates {
+			items, err := s.questions.ListExerciseTemplates(r.Context(), j.ID, q.ID)
+			if err != nil {
+				s.internal(w, "load exercise templates", err)
+				return
+			}
+			ids := make([]int64, len(items))
+			for i := range items {
+				ids[i] = items[i].ID
+			}
+			for _, item := range items {
+				v.ExerciseTemplates = append(v.ExerciseTemplates, ManageOptionView{ID: item.ID, Label: item.Name, MoveUp: movedIDs(ids, item.ID, -1), MoveDown: movedIDs(ids, item.ID, 1)})
 			}
 		}
 		if q.IsActive {
@@ -564,6 +602,55 @@ func (s *Server) reorderOptions(w http.ResponseWriter, r *http.Request) {
 		return s.questions.ReorderOptions(r.Context(), j.ID, q, questions.ReorderOptionsInput{IDs: ids})
 	})
 }
+func (s *Server) createExerciseTemplate(w http.ResponseWriter, r *http.Request) {
+	s.questionPost(w, r, func(j profiles.Journal) error {
+		q, e := pathID(r, "id")
+		if e != nil {
+			return e
+		}
+		_, e = s.questions.CreateExerciseTemplate(r.Context(), j.ID, q, questions.CreateExerciseTemplateInput{Name: r.FormValue("name")})
+		return e
+	})
+}
+func (s *Server) renameExerciseTemplate(w http.ResponseWriter, r *http.Request) {
+	s.questionPost(w, r, func(j profiles.Journal) error {
+		q, e := pathID(r, "id")
+		if e != nil {
+			return e
+		}
+		id, e := pathID(r, "templateID")
+		if e != nil {
+			return e
+		}
+		return s.questions.RenameExerciseTemplate(r.Context(), j.ID, q, id, questions.RenameExerciseTemplateInput{Name: r.FormValue("name")})
+	})
+}
+func (s *Server) deleteExerciseTemplate(w http.ResponseWriter, r *http.Request) {
+	s.questionPost(w, r, func(j profiles.Journal) error {
+		q, e := pathID(r, "id")
+		if e != nil {
+			return e
+		}
+		id, e := pathID(r, "templateID")
+		if e != nil {
+			return e
+		}
+		return s.questions.DeleteExerciseTemplate(r.Context(), j.ID, q, id)
+	})
+}
+func (s *Server) reorderExerciseTemplates(w http.ResponseWriter, r *http.Request) {
+	s.questionPost(w, r, func(j profiles.Journal) error {
+		q, e := pathID(r, "id")
+		if e != nil {
+			return e
+		}
+		ids, e := formIDs(r)
+		if e != nil {
+			return e
+		}
+		return s.questions.ReorderExerciseTemplates(r.Context(), j.ID, q, questions.ReorderExerciseTemplatesInput{IDs: ids})
+	})
+}
 
 func questionError(err error) string {
 	switch {
@@ -575,6 +662,12 @@ func questionError(err error) string {
 		return "Calendar marker must be 16 characters or fewer."
 	case errors.Is(err, questions.ErrOptionsNotAllowed):
 		return "Options are only available for select and multiple choice questions."
+	case errors.Is(err, questions.ErrTemplatesNotAllowed):
+		return "Exercise templates are only available for Workout questions."
+	case errors.Is(err, questions.ErrInvalidTemplateName):
+		return "Exercise template names must be between 1 and 100 characters."
+	case errors.Is(err, questions.ErrDuplicateTemplate):
+		return "That exercise template already exists for this Workout question."
 	case errors.Is(err, questions.ErrInvalidReorder):
 		return "Could not reorder the active items."
 	case errors.Is(err, questions.ErrNotFound):
@@ -1143,6 +1236,13 @@ func (s *Server) renderDay(w http.ResponseWriter, r *http.Request, p profiles.Pr
 			label = a.QuestionLabelSnapshot
 		}
 		v := QuestionView{ID: q.ID, Label: label, Type: string(q.Type), Active: q.IsActive}
+		if q.Type == questions.QuestionTypeWorkout {
+			v.ExerciseTemplates, err = s.questions.ListExerciseTemplates(r.Context(), j.ID, q.ID)
+			if err != nil {
+				s.internal(w, "load workout templates", err)
+				return
+			}
+		}
 		if has {
 			if a.TextValue != nil {
 				v.Value = *a.TextValue

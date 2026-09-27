@@ -353,3 +353,47 @@ func TestWorkoutIsAValidQuestionType(t *testing.T) {
 		t.Fatalf("CreateQuestion() question=%+v err=%v", question, err)
 	}
 }
+
+func TestExerciseTemplateLifecycleOrderingValidationAndScope(t *testing.T) {
+	store, _ := newTestStore(t)
+	workout := mustCreateQuestion(t, store, 1, "Strength", QuestionTypeWorkout)
+	otherWorkout := mustCreateQuestion(t, store, 2, "Rehab", QuestionTypeWorkout)
+	text := mustCreateQuestion(t, store, 1, "Notes", QuestionTypeLongText)
+	first, err := store.CreateExerciseTemplate(t.Context(), 1, workout.ID, CreateExerciseTemplateInput{Name: "  Bench Press  "})
+	if err != nil || first.Name != "Bench Press" || first.Position != 0 {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := store.CreateExerciseTemplate(t.Context(), 1, workout.ID, CreateExerciseTemplateInput{Name: "Squat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateExerciseTemplate(t.Context(), 1, workout.ID, CreateExerciseTemplateInput{Name: "bench press"}); !errors.Is(err, ErrDuplicateTemplate) {
+		t.Fatalf("duplicate error=%v", err)
+	}
+	if _, err := store.CreateExerciseTemplate(t.Context(), 2, otherWorkout.ID, CreateExerciseTemplateInput{Name: "Bench Press"}); err != nil {
+		t.Fatalf("same name in another workout: %v", err)
+	}
+	if _, err := store.CreateExerciseTemplate(t.Context(), 1, text.ID, CreateExerciseTemplateInput{Name: "Bench"}); !errors.Is(err, ErrTemplatesNotAllowed) {
+		t.Fatalf("non-workout error=%v", err)
+	}
+	if _, err := store.CreateExerciseTemplate(t.Context(), 2, workout.ID, CreateExerciseTemplateInput{Name: "Foreign"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign error=%v", err)
+	}
+	if err := store.RenameExerciseTemplate(t.Context(), 1, workout.ID, second.ID, RenameExerciseTemplateInput{Name: "Back squat"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReorderExerciseTemplates(t.Context(), 1, workout.ID, ReorderExerciseTemplatesInput{IDs: []int64{second.ID, first.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListExerciseTemplates(t.Context(), 1, workout.ID)
+	if err != nil || len(items) != 2 || items[0].Name != "Back squat" {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := store.DeleteExerciseTemplate(t.Context(), 1, workout.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, _ = store.ListExerciseTemplates(t.Context(), 1, workout.ID)
+	if len(items) != 1 || items[0].ID != first.ID {
+		t.Fatalf("after delete=%+v", items)
+	}
+}

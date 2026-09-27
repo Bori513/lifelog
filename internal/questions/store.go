@@ -257,6 +257,110 @@ func (s *Store) ReorderOptions(ctx context.Context, journalID, questionID int64,
 	return s.reorder(ctx, `SELECT o.id FROM question_options o JOIN questions q ON q.id = o.question_id WHERE q.journal_id = ? AND o.question_id = ? AND o.is_active = 1`, `UPDATE question_options SET position = ? WHERE id = ? AND question_id = ? AND is_active = 1`, []int64{journalID, questionID}, input.IDs, "options")
 }
 
+func (s *Store) GetQuestion(ctx context.Context, journalID, questionID int64) (Question, error) {
+	q, err := scanQuestion(s.db.QueryRowContext(ctx, `SELECT id, journal_id, label, type, calendar_marker, position, is_active, created_at, updated_at FROM questions WHERE id = ? AND journal_id = ?`, questionID, journalID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Question{}, ErrNotFound
+	}
+	if err != nil {
+		return Question{}, fmt.Errorf("get question: %w", err)
+	}
+	return q, nil
+}
+
+func (s *Store) CreateExerciseTemplate(ctx context.Context, journalID, questionID int64, input CreateExerciseTemplateInput) (ExerciseTemplate, error) {
+	name, err := validTemplateName(input.Name)
+	if err != nil {
+		return ExerciseTemplate{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ExerciseTemplate{}, fmt.Errorf("begin exercise template creation: %w", err)
+	}
+	defer tx.Rollback()
+	var kind QuestionType
+	if err := tx.QueryRowContext(ctx, `SELECT type FROM questions WHERE id = ? AND journal_id = ?`, questionID, journalID).Scan(&kind); errors.Is(err, sql.ErrNoRows) {
+		return ExerciseTemplate{}, ErrNotFound
+	} else if err != nil {
+		return ExerciseTemplate{}, fmt.Errorf("find exercise template question: %w", err)
+	}
+	if kind != QuestionTypeWorkout {
+		return ExerciseTemplate{}, ErrTemplatesNotAllowed
+	}
+	var position int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM workout_exercise_templates WHERE question_id = ?`, questionID).Scan(&position); err != nil {
+		return ExerciseTemplate{}, fmt.Errorf("find exercise template position: %w", err)
+	}
+	row := tx.QueryRowContext(ctx, `INSERT INTO workout_exercise_templates (question_id, name, position, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING id, question_id, name, position, created_at`, questionID, name, position)
+	var item ExerciseTemplate
+	if err := row.Scan(&item.ID, &item.QuestionID, &item.Name, &item.Position, &item.CreatedAt); err != nil {
+		return ExerciseTemplate{}, templateWriteError("create exercise template", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return ExerciseTemplate{}, fmt.Errorf("commit exercise template creation: %w", err)
+	}
+	return item, nil
+}
+
+func (s *Store) ListExerciseTemplates(ctx context.Context, journalID, questionID int64) ([]ExerciseTemplate, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT t.id, t.question_id, t.name, t.position, t.created_at FROM workout_exercise_templates t JOIN questions q ON q.id = t.question_id WHERE q.journal_id = ? AND q.id = ? ORDER BY t.position, t.id`, journalID, questionID)
+	if err != nil {
+		return nil, fmt.Errorf("list exercise templates: %w", err)
+	}
+	defer rows.Close()
+	var result []ExerciseTemplate
+	for rows.Next() {
+		var item ExerciseTemplate
+		if err := rows.Scan(&item.ID, &item.QuestionID, &item.Name, &item.Position, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan exercise template: %w", err)
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list exercise templates: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Store) RenameExerciseTemplate(ctx context.Context, journalID, questionID, templateID int64, input RenameExerciseTemplateInput) error {
+	name, err := validTemplateName(input.Name)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE workout_exercise_templates SET name = ? WHERE id = ? AND question_id = ? AND EXISTS (SELECT 1 FROM questions WHERE id = ? AND journal_id = ? AND type = 'workout')`, name, templateID, questionID, questionID, journalID)
+	if err != nil {
+		return templateWriteError("rename exercise template", err)
+	}
+	return requireChanged(result)
+}
+
+func (s *Store) DeleteExerciseTemplate(ctx context.Context, journalID, questionID, templateID int64) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM workout_exercise_templates WHERE id = ? AND question_id = ? AND EXISTS (SELECT 1 FROM questions WHERE id = ? AND journal_id = ? AND type = 'workout')`, templateID, questionID, questionID, journalID)
+	if err != nil {
+		return fmt.Errorf("delete exercise template: %w", err)
+	}
+	return requireChanged(result)
+}
+
+func (s *Store) ReorderExerciseTemplates(ctx context.Context, journalID, questionID int64, input ReorderExerciseTemplatesInput) error {
+	return s.reorder(ctx, `SELECT t.id FROM workout_exercise_templates t JOIN questions q ON q.id = t.question_id WHERE q.journal_id = ? AND q.id = ? AND q.type = 'workout'`, `UPDATE workout_exercise_templates SET position = ? WHERE id = ? AND question_id = ?`, []int64{journalID, questionID}, input.IDs, "exercise templates")
+}
+
+func validTemplateName(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || len([]rune(value)) > MaxExerciseTemplateRunes {
+		return "", ErrInvalidTemplateName
+	}
+	return value, nil
+}
+
+func templateWriteError(operation string, err error) error {
+	if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+		return ErrDuplicateTemplate
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
 func (s *Store) reorder(ctx context.Context, selectSQL, updateSQL string, parent any, ids []int64, name string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

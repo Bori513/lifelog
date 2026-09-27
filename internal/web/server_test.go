@@ -151,7 +151,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v12"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v14"`},
 		{"/sw.js", "text/javascript", `"/static/navigation.css"`},
 		{"/static/navigation.css", "text/css", `.mobile-nav`},
 		{"/static/navigation.css", "text/css", `.mobile-more[hidden]`},
@@ -1174,10 +1174,16 @@ func TestWorkoutDayControlsAndRawSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := a.questions.CreateExerciseTemplate(t.Context(), js[0].ID, q.ID, questions.CreateExerciseTemplateInput{Name: "Bench Press"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.questions.CreateExerciseTemplate(t.Context(), js[0].ID, q.ID, questions.CreateExerciseTemplateInput{Name: `<script>alert("x")</script>`}); err != nil {
+		t.Fatal(err)
+	}
 	a.loginProfile(p.ID)
 	token, w := a.getToken("/day/2026-09-27")
 	body := w.Body.String()
-	for _, want := range []string{`data-workout-input`, `data-workout-preview`, `data-focus-editor`, `data-pin-question`, `data-pinned-question-list`, `data-focus-dialog`, `aria-pressed="false"`} {
+	for _, want := range []string{`data-workout-input`, `data-workout-preview`, `data-focus-editor`, `data-pin-question`, `data-pinned-question-list`, `data-focus-dialog`, `aria-pressed="false"`, `data-exercise-template="Bench Press"`, `History`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("day missing %q: %s", want, body)
 		}
@@ -1187,6 +1193,9 @@ func TestWorkoutDayControlsAndRawSave(t *testing.T) {
 	}
 	if strings.Contains(body, "onclick=") || strings.Contains(body, "<script>") {
 		t.Fatalf("day introduced inline script or handler: %s", body)
+	}
+	if !strings.Contains(body, `&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;`) {
+		t.Fatalf("template name was not escaped: %s", body)
 	}
 	raw := "Bench 10x60, nope, 6x80"
 	prefix := "q_" + strconv.FormatInt(q.ID, 10)
@@ -1198,5 +1207,71 @@ func TestWorkoutDayControlsAndRawSave(t *testing.T) {
 	day, err := a.journal.GetDay(t.Context(), js[0].ID, "2026-09-27")
 	if err != nil || len(day.Answers) != 1 || day.Answers[0].TextValue == nil || *day.Answers[0].TextValue != raw {
 		t.Fatalf("saved day=%+v err=%v", day, err)
+	}
+}
+
+func TestWorkoutDraftTemplateVisibilityAndFocusLayoutAssets(t *testing.T) {
+	a := newTestApp(t)
+	js := a.request(http.MethodGet, "/static/app.js", nil).Body.String()
+	for _, want := range []string{
+		`const draftExerciseNames = (raw, templateNames)`,
+		`const line = rawLine.trim()`,
+		`if (normalizedLine === item.key) return true`,
+		`return /^\s+\d/.test(suffix)`,
+		`right.key.length - left.key.length`,
+		`input.addEventListener("input", update)`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js missing draft visibility behavior %q", want)
+		}
+	}
+	css := a.request(http.MethodGet, "/static/day.css", nil).Body.String()
+	for _, want := range []string{
+		`.exercise-template-chips { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-start;`,
+		`.exercise-template-chip { flex: 0 0 auto; width: auto; height: auto;`,
+		`.focus-editor-body .workout-editor { grid-template-rows: auto minmax(0, 1fr) auto; }`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("day.css missing Focus template layout %q", want)
+		}
+	}
+}
+
+func TestWorkoutHistoryScopedRenderingPeriodsAndSecurity(t *testing.T) {
+	a := newTestApp(t)
+	p := a.create("Lifter", "", "UTC")
+	journals, _ := a.profiles.ListJournals(t.Context(), p.ID)
+	q, _ := a.questions.CreateQuestion(t.Context(), journals[0].ID, questions.CreateQuestionInput{Label: "Strength", Type: questions.QuestionTypeWorkout})
+	notes, _ := a.questions.CreateQuestion(t.Context(), journals[0].ID, questions.CreateQuestionInput{Label: "Notes", Type: questions.QuestionTypeLongText})
+	a.questions.CreateExerciseTemplate(t.Context(), journals[0].ID, q.ID, questions.CreateExerciseTemplateInput{Name: "Bench Press"})
+	old, recent := "bench press 6x95", "BENCH PRESS 8x95,broken\nPull ups 20"
+	a.journal.SaveDay(t.Context(), journals[0].ID, "2026-08-31", journal.SaveDayInput{Answers: []journal.AnswerInput{{QuestionID: q.ID, TextValue: &old}}})
+	a.journal.SaveDay(t.Context(), journals[0].ID, "2026-09-27", journal.SaveDayInput{Answers: []journal.AnswerInput{{QuestionID: q.ID, TextValue: &recent}}})
+	unauth := a.request(http.MethodGet, "/workout/questions/"+strconv.FormatInt(q.ID, 10), nil)
+	if unauth.Code != http.StatusSeeOther {
+		t.Fatalf("unauth code=%d", unauth.Code)
+	}
+	a.loginProfile(p.ID)
+	w := a.request(http.MethodGet, "/workout/questions/"+strconv.FormatInt(q.ID, 10), nil)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "8 × 95 kg") || !strings.Contains(body, "Bench Press") || !strings.Contains(body, "8x95") {
+		t.Fatalf("history code=%d body=%s", w.Code, body)
+	}
+	if strings.Index(body, "27 September 2026") > strings.Index(body, "31 August 2026") {
+		t.Fatalf("history is not newest first: %s", body)
+	}
+	w = a.request(http.MethodGet, fmt.Sprintf("/workout/questions/%d?view=month&month=2026-09&exercise=bench+press", q.ID), nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "September 2026") || !strings.Contains(w.Body.String(), ">1</strong>") || !strings.Contains(w.Body.String(), "Previous period") {
+		t.Fatalf("month code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = a.request(http.MethodGet, "/workout/questions/"+strconv.FormatInt(notes.ID, 10), nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("non-workout code=%d", w.Code)
+	}
+	other := a.create("Other", "", "UTC")
+	a.loginProfile(other.ID)
+	w = a.request(http.MethodGet, "/workout/questions/"+strconv.FormatInt(q.ID, 10), nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("foreign code=%d", w.Code)
 	}
 }

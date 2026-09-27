@@ -8,10 +8,14 @@ var (
 	ErrInvalidQuestionType   = errors.New("questions: invalid question type")
 	ErrInvalidCalendarMarker = errors.New("questions: calendar marker is too long")
 	ErrOptionsNotAllowed     = errors.New("questions: options are only allowed for select and multi-select questions")
+	ErrTemplatesNotAllowed   = errors.New("questions: exercise templates are only allowed for workout questions")
+	ErrInvalidTemplateName   = errors.New("questions: exercise template name must be between 1 and 100 characters")
+	ErrDuplicateTemplate     = errors.New("questions: exercise template name already exists")
 	ErrInvalidReorder        = errors.New("questions: reorder must contain every active item exactly once")
 )
 
 const MaxCalendarMarkerRunes = 16
+const MaxExerciseTemplateRunes = 100
 
 type QuestionType string
 
@@ -63,6 +67,13 @@ type QuestionOption struct {
 	IsActive   bool
 }
 
+type ExerciseTemplate struct {
+	ID, QuestionID int64
+	Name           string
+	Position       int
+	CreatedAt      string
+}
+
 type CreateQuestionInput struct {
 	Label          string
 	Type           QuestionType
@@ -89,3 +100,7 @@ type RenameOptionInput struct {
 type ReorderOptionsInput struct {
 	IDs []int64
 }
+
+type CreateExerciseTemplateInput struct{ Name string }
+type RenameExerciseTemplateInput struct{ Name string }
+type ReorderExerciseTemplatesInput struct{ IDs []int64 }

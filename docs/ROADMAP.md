@@ -29,6 +29,7 @@ LifeLog is in active development. Phases are intended to proceed in order.
 - [x] Calendar overview
 - [x] Generic per-question Calendar markers
 - [x] Workout quick entry, focus editor, and browser-local question pinning
+- [x] Question-scoped Workout exercise templates and History/Month/Year performance views
 - [x] Compact mobile bottom navigation with an accessible More menu
 - [ ] Multiple journals per user in the interface
 - [ ] Voice notes

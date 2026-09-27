@@ -10,6 +10,7 @@ except for photo files, whose metadata and relative paths are stored in SQLite.
 users 1 ── * journals 1 ── * days 1 ── * answers
                     │           └────── * photos
                     └── * questions 1 ── * question_options
+                                      └── * workout_exercise_templates
                                       └── * answers
 answers * ── * question_options (through answer_options)
 ```
@@ -83,6 +84,21 @@ configuration; historical selected answers retain the earlier wording through
 Option positions are zero-based. Active options are shown by position and ID;
 reactivating an option appends it to the end of the active option list.
 
+### `workout_exercise_templates`
+
+| Field | Notes |
+| --- | --- |
+| `id` | Primary key |
+| `question_id` | Owning Workout question |
+| `name` | Trimmed quick-insert name, unique case-insensitively per question |
+| `position` | Display order within the question |
+| `created_at` | Creation timestamp |
+
+Templates belong to one Workout question and are not a global exercise catalog.
+They can be renamed, reordered, and deleted without modifying historical answers.
+Deleting the owning question cascades to its templates; normal question history
+protection and deactivation behavior are unchanged.
+
 ### `days`
 
 | Field | Notes |
@@ -123,7 +139,8 @@ application validation is required in all cases.
 
 Workout answers reuse `text_value`; their exact raw notation is authoritative.
 Parsed exercises and sets are derived data and are not persisted in separate
-tables.
+tables. Workout History loads answers for one owned Workout question and derives
+exercise grouping and best performances on read.
 
 The daily Save input distinguishes an omitted question from an explicitly cleared
 question. Clearing deletes the answer row (and cascades to its selected options)

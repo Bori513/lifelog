@@ -20,6 +20,7 @@ type Set struct {
 	Reps     int
 	LoadType LoadType
 	Weight   float64
+	Raw      string
 }
 
 type Exercise struct {
@@ -96,7 +97,7 @@ func parseSet(token string) (Set, bool) {
 	if err != nil {
 		return Set{}, false
 	}
-	set := Set{Reps: reps, LoadType: Bodyweight}
+	set := Set{Reps: reps, LoadType: Bodyweight, Raw: token}
 	if match[2] == "" {
 		return set, true
 	}

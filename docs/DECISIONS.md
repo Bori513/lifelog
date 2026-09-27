@@ -127,7 +127,19 @@ outweighs the project's priority order: simplicity, reliability, speed, features
 - **Keep workout entries raw-text-first.** Workout questions store their exact
   input in `answers.text_value`; the compact parser produces derived data, and
   malformed notation produces a preview warning but never blocks a day Save.
-  Historical long-text migration and workout progress calculations are deferred.
+  Historical long-text migration remains deferred.
+- **Scope exercise templates and history to one Workout question.** Templates are
+  ordered quick-insert helpers, not a global exercise database. A chip disappears
+  while its trimmed, case-insensitive exact exercise name is parsed in the current
+  textarea, providing a per-day completion hint, and reappears when that line is
+  removed. Renaming or deleting templates never rewrites raw history.
+- **Derive Workout History from raw answers on read.** History shows one exercise
+  at a time, groups names by trimmed case-insensitive exact match, prefers template
+  spelling/order, and lists entries newest first. One day containing the exercise
+  is one session. Best performance prioritizes load then repetitions (or lower
+  assistance then repetitions), and incompatible external, added, assisted, and
+  bodyweight types are evaluated separately. Month and Year use calendar periods;
+  Week, estimated 1RM, strength scores, charts, and persisted analytics are omitted.
 - **Keep question pins browser-local.** Pins are stored in `localStorage`, scoped
   by journal ID, and reorder only existing daily form cards. Database question
   positions remain unchanged.

@@ -4,13 +4,32 @@
 .question-heading { flex-wrap: wrap; }
 .question-heading > label { min-width: 0; flex: 1 1 140px; overflow-wrap: anywhere; }
 .question-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.question-action { min-height: 42px; border: 0; border-radius: 9px; padding: 7px 10px; background: var(--surface-secondary); color: var(--accent); cursor: pointer; }
+.question-action { min-height: 42px; border: 0; border-radius: 9px; padding: 7px 10px; background: var(--surface-secondary); color: var(--accent); cursor: pointer; display: grid; place-items: center; text-decoration: none; }
 .question-action[aria-pressed="true"] { background: var(--accent-soft); font-weight: 750; }
 .workout-preview { display: grid; gap: 8px; font-size: .86rem; }
 .workout-preview:empty { display: none; }
 .workout-preview p { margin: 0; }
 .workout-preview strong { display: block; color: var(--text); }
 .workout-warning { padding: 9px 10px; border-left: 3px solid var(--warning); background: var(--surface-secondary); color: var(--text-muted); overflow-wrap: anywhere; }
+.exercise-template-chips { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-start; gap: 7px; min-width: 0; }
+.exercise-template-chip { flex: 0 0 auto; width: auto; height: auto; max-width: 100%; min-height: 38px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 6px 11px; background: var(--surface-secondary); color: var(--accent); cursor: pointer; overflow-wrap: anywhere; }
+.exercise-template-chip:hover { background: var(--surface-hover); }
+.workout-selector { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-bottom: 14px; }
+.history-tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.history-tabs a { min-height: 44px; display: grid; place-items: center; color: var(--accent); text-decoration: none; background: var(--surface); }
+.history-tabs a[aria-current="page"] { background: var(--accent); color: var(--accent-contrast); font-weight: 750; }
+.period-nav { display: grid; grid-template-columns: 46px minmax(0, 1fr) 46px; align-items: center; gap: 8px; text-align: center; margin-bottom: 14px; }
+.period-nav h2 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.performance-grid,.workout-entry-list { display: grid; gap: 12px; margin-top: 14px; }
+.performance-card,.workout-summary { gap: 5px; }
+.performance-value { font-size: 1.35rem; overflow-wrap: anywhere; }
+.workout-entry-list h2,.previous-performance h2 { margin: 8px 0 0; font-size: 1.05rem; }
+.workout-entry { color: var(--text); text-decoration: none; gap: 5px; }
+.workout-entry time { color: var(--accent); font-weight: 700; }
+.workout-entry strong { overflow-wrap: anywhere; }
+.previous-performance { margin-top: 18px; padding: 14px; border-left: 3px solid var(--border-strong); }
+.previous-performance p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 6px 0; }
+@media(max-width:430px){.workout-selector{grid-template-columns:1fr}.workout-selector .outline-button{width:100%}.question-actions{gap:2px}.question-action{padding-inline:8px}}
 .focus-editor { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: var(--bg); color: var(--text); }
 .focus-editor::backdrop { background: #0008; }
 .focus-editor-shell { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
@@ -18,6 +37,7 @@
 .focus-editor h2 { margin: 0; font-size: 1.1rem; }
 .focus-editor-body { min-height: 0; padding-top: 12px; }
 .focus-editor-body .text-editor { height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; }
+.focus-editor-body .workout-editor { grid-template-rows: auto minmax(0, 1fr) auto; }
 .focus-editor-body textarea { height: 100%; min-height: 0; resize: none; }
 .focus-editor-body .workout-preview { max-height: 24vh; overflow: auto; }
 .focus-editor-open { overflow: hidden; }
