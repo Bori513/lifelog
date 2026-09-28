@@ -63,6 +63,55 @@ func TestCanonicalParserDoesNotTreatBareOrIncompleteDraftNamesAsHistory(t *testi
 	}
 }
 
+func TestParseActivityMetricsAndDurationSets(t *testing.T) {
+	for _, raw := range []string{
+		"Incline walk 30m i15 2.25km",
+		"Incline walk 2.25km 30m i15",
+		"Incline walk i15 2.25km 30m",
+	} {
+		got := Parse(raw)
+		if len(got.Exercises) != 1 || len(got.Issues) != 0 || got.Exercises[0].Activity == nil {
+			t.Fatalf("Parse(%q) = %+v", raw, got)
+		}
+		activity := got.Exercises[0].Activity
+		if len(activity.Durations) != 1 || activity.Durations[0] != 1800 || activity.DistanceKM == nil || *activity.DistanceKM != 2.25 || activity.Incline == nil || *activity.Incline != 15 {
+			t.Fatalf("activity = %+v", activity)
+		}
+	}
+	timed := Parse("Plank 1m30s,1m 15s,55s")
+	if len(timed.Exercises) != 1 || timed.Exercises[0].Activity == nil || len(timed.Exercises[0].Activity.Durations) != 3 || timed.Exercises[0].Activity.Durations[1] != 75 {
+		t.Fatalf("timed = %+v", timed)
+	}
+}
+
+func TestActivityFormattingAndBests(t *testing.T) {
+	parsed := Parse("Walk 1h 15m 30s i12.5 8.4km").Exercises[0].Activity
+	if FormatDuration(4530) != "1h 15m 30s" || FormatKilometers(2.25) != "2.25 km" || FormatIncline(12.5) != "incline 12.5" || FormatActivity(*parsed) != "1h15m30s · 8.4km · incline 12.5" {
+		t.Fatalf("format activity = %q", FormatActivity(*parsed))
+	}
+	entries := []HistoryEntry{{Activities: []Activity{*parsed, {Durations: []int{90}, DistanceKM: floatPointer(9)}}}}
+	bests := Bests(entries)
+	if len(bests) != 2 || bests[0].Metric != "duration" || bests[0].Duration != 4530 || bests[1].Metric != "distance" || bests[1].DistanceKM != 9 {
+		t.Fatalf("bests = %+v", bests)
+	}
+}
+
+func TestDuplicateActivityMetricIsAnIssueButSafeMetricSurvives(t *testing.T) {
+	got := Parse("Incline walk 30m 45m 2km")
+	if len(got.Issues) != 1 || len(got.Exercises) != 1 || got.Exercises[0].Activity == nil || len(got.Exercises[0].Activity.Durations) != 0 || got.Exercises[0].Activity.DistanceKM == nil || *got.Exercises[0].Activity.DistanceKM != 2 {
+		t.Fatalf("Parse duplicate metric = %+v", got)
+	}
+}
+
+func TestMalformedTimedSeriesKeepsValidDurations(t *testing.T) {
+	got := Parse("Plank 1m,bad,55s")
+	if len(got.Issues) != 1 || len(got.Exercises) != 1 || got.Exercises[0].Activity == nil || len(got.Exercises[0].Activity.Durations) != 2 {
+		t.Fatalf("Parse partial durations = %+v", got)
+	}
+}
+
+func floatPointer(value float64) *float64 { return &value }
+
 func TestHistoryGroupingOrderingAndBests(t *testing.T) {
 	records := []AnswerRecord{
 		{Date: "2026-09-27", Raw: "bench press 3x95,broken,8x95\nPull ups 10,5+25,10-5"},

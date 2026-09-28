@@ -94,13 +94,43 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = document.querySelector("[data-dirty-form]");
   if (!form) return;
 
+  const parseActivity = text => {
+    const raw = text.trim();
+    const duration = /^(?:(\d+)h(?:\s*(\d+)m)?(?:\s*(\d+)s)?|(\d+)m(?:\s*(\d+)s)?|(\d+)s)/i;
+    if (raw.includes(",")) {
+      const values = raw.split(",").map(value => value.trim());
+      if (values.length && values.every(value => duration.test(value) && value.match(duration)[0].length === value.length)) return {detail: values.join(",")};
+      return null;
+    }
+    let remaining = raw, durationValue = null, distance = null, incline = null;
+    while (remaining) {
+      let match = remaining.match(duration);
+      if (match) {
+        if (durationValue !== null) return null;
+        durationValue = match[0].replace(/\s+/g, ""); remaining = remaining.slice(match[0].length).trim(); continue;
+      }
+      match = remaining.match(/^(\d+(?:\.\d+)?)km\b/i);
+      if (match) {
+        if (distance !== null || Number(match[1]) <= 0) return null;
+        distance = `${Number(match[1])}km`; remaining = remaining.slice(match[0].length).trim(); continue;
+      }
+      match = remaining.match(/^i(\d+(?:\.\d+)?)\b/i);
+      if (match) {
+        if (incline !== null) return null;
+        incline = `incline ${Number(match[1])}`; remaining = remaining.slice(match[0].length).trim(); continue;
+      }
+      return null;
+    }
+    const parts = [durationValue, distance, incline].filter(value => value !== null);
+    return parts.length ? {detail: parts.join(" · ")} : null;
+  };
   const parseWorkoutLine = line => {
     for (let i = 0; i < line.length; i++) {
       if (line[i] !== " " && line[i] !== "\t") continue;
       const name = line.slice(0, i).trim().replace(/:$/, "").trim();
       const setText = line.slice(i).trim();
       const first = setText.split(",", 1)[0].trim();
-      if (name && /^(\d+)\s*(?:([xX+\-])\s*(\d+(?:\.\d+)?))?$/.test(first)) return {name, setText};
+      if (name && (/^(\d+)\s*(?:([xX+\-])\s*(\d+(?:\.\d+)?))?$/.test(first) || parseActivity(setText))) return {name, setText};
     }
     return null;
   };
@@ -110,6 +140,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!line.trim()) return;
       const split = parseWorkoutLine(line);
       if (!split) { warnings.push(line); return; }
+      const activity = parseActivity(split.setText);
+      if (activity) { exercises.push({name: split.name, activity, sets: []}); return; }
       const sets = [];
       split.setText.split(",").forEach(value => {
         const token = value.trim();
@@ -158,6 +190,9 @@ document.addEventListener("DOMContentLoaded", () => {
     parsed.exercises.forEach(exercise => {
       const row = document.createElement("p");
       const title = document.createElement("strong"); title.textContent = exercise.name;
+      if (exercise.activity) {
+        row.append(title, document.createTextNode(exercise.activity.detail)); target.append(row); return;
+      }
       const external = exercise.sets.filter(set => set.type === "external").map(set => set.weight);
       const added = exercise.sets.filter(set => set.type === "added").map(set => set.weight);
       const assisted = exercise.sets.filter(set => set.type === "assisted").map(set => set.weight);
@@ -228,6 +263,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const focusDialog = document.querySelector("[data-focus-dialog]");
   const focusBody = focusDialog?.querySelector("[data-focus-body]");
   const focusTitle = focusDialog?.querySelector("[data-focus-title]");
+  const focusWorkoutHelp = focusDialog?.querySelector("[data-focus-workout-help]");
   let focusedEditor = null, editorPlaceholder = null, focusButton = null;
   const closeFocus = () => {
     if (!focusedEditor || !editorPlaceholder) return;
@@ -241,11 +277,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!focusDialog || !focusBody || !editor) return;
     focusButton = button; focusedEditor = editor; editorPlaceholder = document.createComment("editor position");
     editor.replaceWith(editorPlaceholder); focusBody.append(editor);
+    if (focusWorkoutHelp) focusWorkoutHelp.hidden = !editor.classList.contains("workout-editor");
     if (focusTitle) focusTitle.textContent = card.querySelector(".question-heading > label")?.textContent || "Focus editor";
     focusDialog.showModal(); document.body.classList.add("focus-editor-open"); editor.querySelector("textarea")?.focus();
   }));
   focusDialog?.querySelector("[data-focus-close]")?.addEventListener("click", closeFocus);
   focusDialog?.addEventListener("cancel", event => { event.preventDefault(); closeFocus(); });
+
+  const workoutHelpDialog = document.querySelector("[data-workout-help-dialog]");
+  let workoutHelpButton = null;
+  const closeWorkoutHelp = () => { workoutHelpDialog?.close(); workoutHelpButton?.focus(); };
+  document.querySelectorAll("[data-workout-help]").forEach(button => button.addEventListener("click", () => {
+    workoutHelpButton = button; workoutHelpDialog?.showModal(); workoutHelpDialog?.querySelector("[data-workout-help-close]")?.focus();
+  }));
+  workoutHelpDialog?.querySelector("[data-workout-help-close]")?.addEventListener("click", closeWorkoutHelp);
+  workoutHelpDialog?.addEventListener("cancel", event => { event.preventDefault(); closeWorkoutHelp(); });
 
   let dirty = false;
   const label = document.querySelector(".dirty-label");

@@ -151,7 +151,7 @@ func TestPWAAssetsAndMetadata(t *testing.T) {
 		body        string
 	}{
 		{"/manifest.webmanifest", "application/manifest+json", `"display": "standalone"`},
-		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v15"`},
+		{"/sw.js", "text/javascript", `const CACHE_NAME = "lifelog-static-v16"`},
 		{"/sw.js", "text/javascript", `"/static/navigation.css"`},
 		{"/static/navigation.css", "text/css", `.mobile-nav`},
 		{"/static/navigation.css", "text/css", `.mobile-more[hidden]`},
@@ -1183,7 +1183,7 @@ func TestWorkoutDayControlsAndRawSave(t *testing.T) {
 	a.loginProfile(p.ID)
 	token, w := a.getToken("/day/2026-09-27")
 	body := w.Body.String()
-	for _, want := range []string{`data-workout-input`, `data-workout-preview`, `data-focus-editor`, `data-pin-question`, `data-pinned-question-list`, `data-focus-dialog`, `aria-pressed="false"`, `data-exercise-template="Bench Press"`, `History`} {
+	for _, want := range []string{`data-workout-input`, `data-workout-preview`, `data-focus-editor`, `data-pin-question`, `data-pinned-question-list`, `data-focus-dialog`, `data-workout-help`, `data-workout-help-dialog`, `Workout syntax`, `aria-pressed="false"`, `data-exercise-template="Bench Press"`, `History`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("day missing %q: %s", want, body)
 		}

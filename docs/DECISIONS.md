@@ -138,8 +138,10 @@ outweighs the project's priority order: simplicity, reliability, speed, features
   spelling/order, and lists entries newest first. One day containing the exercise
   is one session. Best performance prioritizes load then repetitions (or lower
   assistance then repetitions), and incompatible external, added, assisted, and
-  bodyweight types are evaluated separately. Month and Year use calendar periods;
-  Week, estimated 1RM, strength scores, charts, and persisted analytics are omitted.
+  bodyweight types are evaluated separately. Duration, kilometer distance, and
+  incline remain derived from raw text; History can show longest duration and
+  distance, while incline is metadata only. Month and Year use calendar periods;
+  Week, pace, estimated 1RM, strength scores, charts, and persisted analytics are omitted.
 - **Keep question pins browser-local.** Pins are stored in `localStorage`, scoped
   by journal ID, and reorder only existing daily form cards. Database question
   positions remain unchanged.

@@ -19,14 +19,18 @@ type Template struct {
 type HistoryEntry struct {
 	Date, Sets string
 	ParsedSets []Set
+	Activities []Activity
 }
 type ExerciseHistory struct {
 	Name, Key string
 	Entries   []HistoryEntry
 }
 type Best struct {
-	Type LoadType
-	Set  Set
+	Type       LoadType
+	Set        Set
+	Metric     string
+	Duration   int
+	DistanceKM float64
 }
 
 type Store struct{ db *sql.DB }
@@ -83,6 +87,7 @@ func BuildHistory(records []AnswerRecord, templates []Template) []ExerciseHistor
 	}
 	for _, record := range records {
 		perDay := map[string][]Set{}
+		activitiesPerDay := map[string][]Activity{}
 		rawPerDay := map[string][]string{}
 		names := map[string]string{}
 		var dayOrder []string
@@ -96,8 +101,13 @@ func BuildHistory(records []AnswerRecord, templates []Template) []ExerciseHistor
 				names[key] = strings.TrimSpace(exercise.Name)
 			}
 			perDay[key] = append(perDay[key], exercise.Sets...)
-			for _, set := range exercise.Sets {
-				rawPerDay[key] = append(rawPerDay[key], set.Raw)
+			if exercise.Activity != nil {
+				activitiesPerDay[key] = append(activitiesPerDay[key], *exercise.Activity)
+				rawPerDay[key] = append(rawPerDay[key], FormatActivity(*exercise.Activity))
+			} else {
+				for _, set := range exercise.Sets {
+					rawPerDay[key] = append(rawPerDay[key], set.Raw)
+				}
 			}
 		}
 		for _, key := range dayOrder {
@@ -107,7 +117,7 @@ func BuildHistory(records []AnswerRecord, templates []Template) []ExerciseHistor
 				byKey[key] = h
 				ordered = append(ordered, h)
 			}
-			h.Entries = append(h.Entries, HistoryEntry{Date: record.Date, Sets: strings.Join(rawPerDay[key], ","), ParsedSets: perDay[key]})
+			h.Entries = append(h.Entries, HistoryEntry{Date: record.Date, Sets: strings.Join(rawPerDay[key], ","), ParsedSets: perDay[key], Activities: activitiesPerDay[key]})
 		}
 	}
 	result := make([]ExerciseHistory, 0, len(ordered))
@@ -122,11 +132,22 @@ func BuildHistory(records []AnswerRecord, templates []Template) []ExerciseHistor
 func Bests(entries []HistoryEntry) []Best {
 	byType := map[LoadType]Set{}
 	seen := map[LoadType]bool{}
+	longestDuration, longestDistance := 0, float64(0)
 	for _, entry := range entries {
 		for _, set := range entry.ParsedSets {
 			current := byType[set.LoadType]
 			if !seen[set.LoadType] || better(set, current) {
 				byType[set.LoadType], seen[set.LoadType] = set, true
+			}
+		}
+		for _, activity := range entry.Activities {
+			for _, duration := range activity.Durations {
+				if duration > longestDuration {
+					longestDuration = duration
+				}
+			}
+			if activity.DistanceKM != nil && *activity.DistanceKM > longestDistance {
+				longestDistance = *activity.DistanceKM
 			}
 		}
 	}
@@ -136,6 +157,12 @@ func Bests(entries []HistoryEntry) []Best {
 		if seen[kind] {
 			result = append(result, Best{Type: kind, Set: byType[kind]})
 		}
+	}
+	if longestDuration > 0 {
+		result = append(result, Best{Metric: "duration", Duration: longestDuration})
+	}
+	if longestDistance > 0 {
+		result = append(result, Best{Metric: "distance", DistanceKM: longestDistance})
 	}
 	return result
 }

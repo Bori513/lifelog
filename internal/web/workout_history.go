@@ -127,6 +127,14 @@ func bestViews(items []workout.Best) []WorkoutBestView {
 	result := make([]WorkoutBestView, 0, len(items))
 	for _, item := range items {
 		label, value := "", ""
+		if item.Metric == "duration" {
+			result = append(result, WorkoutBestView{Label: "Longest duration", Value: workout.FormatDuration(item.Duration)})
+			continue
+		}
+		if item.Metric == "distance" {
+			result = append(result, WorkoutBestView{Label: "Longest distance", Value: workout.FormatKilometers(item.DistanceKM)})
+			continue
+		}
 		switch item.Type {
 		case workout.External:
 			label, value = "External load best", fmt.Sprintf("%d × %s kg", item.Set.Reps, formatWorkoutWeight(item.Set.Weight))

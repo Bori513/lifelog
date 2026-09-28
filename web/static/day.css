@@ -6,6 +6,15 @@
 .question-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .question-action { min-height: 42px; border: 0; border-radius: 9px; padding: 7px 10px; background: var(--surface-secondary); color: var(--accent); cursor: pointer; display: grid; place-items: center; text-decoration: none; }
 .question-action[aria-pressed="true"] { background: var(--accent-soft); font-weight: 750; }
+.workout-help-button { font-size: 1.05rem; }
+.workout-help-dialog { width: min(calc(100% - 28px), 540px); max-height: min(86vh, 720px); border: 1px solid var(--border); border-radius: 16px; padding: 0; background: var(--surface); color: var(--text); }
+.workout-help-dialog::backdrop { background: #0008; }
+.workout-help-shell { padding: 18px; overflow: auto; }
+.workout-help-shell header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workout-help-shell h2 { margin: 0; }
+.workout-help-shell dl { display: grid; gap: 5px; }
+.workout-help-shell dt { margin-top: 8px; font-weight: 700; }
+.workout-help-shell dd { margin: 0; overflow-wrap: anywhere; }
 .workout-preview { display: grid; gap: 8px; font-size: .86rem; }
 .workout-preview:empty { display: none; }
 .workout-preview p { margin: 0; }
@@ -34,6 +43,7 @@
 .focus-editor::backdrop { background: #0008; }
 .focus-editor-shell { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
 .focus-editor header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.focus-editor-actions { display: flex; align-items: center; gap: 4px; }
 .focus-editor h2 { margin: 0; font-size: 1.1rem; }
 .focus-editor-body { min-height: 0; padding-top: 12px; }
 .focus-editor-body .text-editor { height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; }

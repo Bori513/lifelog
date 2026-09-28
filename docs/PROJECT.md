@@ -54,7 +54,9 @@ Each Workout question may define its own ordered exercise templates. These are
 quick-insert and consistency helpers rather than a shared exercise catalog. A
 question-scoped History page derives one exercise's newest-first entries and
 simple best performances from raw Workout answers, with calendar Month and Year
-views. Incompatible load types remain separate; Week views, estimated 1RM,
+views. Compact duration, kilometer distance, and incline notation supports timed
+exercises and activities without turning Workout into a structured tracker.
+Incompatible load types remain separate; Week views, estimated 1RM,
 strength scores, graphs, and workout programming are intentionally outside scope.
 
 ## MVP scope
