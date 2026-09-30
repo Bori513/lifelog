@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Bori513/lifelog/internal/backup"
 	"github.com/Bori513/lifelog/internal/database"
 	"github.com/Bori513/lifelog/internal/web"
 )
@@ -20,9 +22,23 @@ const defaultAddr = ":8080"
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	backupMode, err := backupCommand(os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
 	dataDir := os.Getenv("LIFELOG_DATA_DIR")
 	if dataDir == "" {
 		dataDir = defaultDataDir
+	}
+	if backupMode {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		name, err := createServerBackup(ctx, dataDir, os.Getenv("LIFELOG_BACKUP_DIR"))
+		if err != nil {
+			log.Fatalf("create server backup: %v", err)
+		}
+		fmt.Println(name)
+		return
 	}
 
 	db, err := database.Open(dataDir)
@@ -61,6 +77,25 @@ func main() {
 	if err := server.Shutdown(shutdownContext); err != nil {
 		log.Printf("graceful shutdown: %v", err)
 	}
+}
+
+func backupCommand(args []string) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	if len(args) == 1 && args[0] == "backup" {
+		return true, nil
+	}
+	return false, errors.New("usage: lifelog [backup]")
+}
+
+func createServerBackup(ctx context.Context, dataDir, backupDir string) (string, error) {
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return "", fmt.Errorf("initialize LifeLog: %w", err)
+	}
+	defer db.Close()
+	return backup.New(db, dataDir, backupDir).CreateServer(ctx)
 }
 
 func truthy(value string) bool {

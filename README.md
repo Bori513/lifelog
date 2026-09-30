@@ -94,6 +94,16 @@ LifeLog can also write backups to a server directory when
 container. For protection against disk failure, store those backups on a
 different device from the primary data.
 
+To create a server backup without using the web interface, run:
+
+```bash
+docker compose exec -T lifelog lifelog backup
+```
+
+The command uses `LIFELOG_DATA_DIR` and `LIFELOG_BACKUP_DIR`, prints the created
+ZIP filename, and exits with a non-zero status if the backup fails. It is suitable
+for invocation by a systemd timer or another scheduler.
+
 ## Architecture
 
 LifeLog is one Go application running as one process and normally deployed as a
